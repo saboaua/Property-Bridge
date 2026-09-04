@@ -46,7 +46,7 @@ DEFAULT_MAINTENANCE_ENABLED: Final = False
 DEFAULT_MAINTENANCE_REQUIRE_CONSENT: Final = True
 DEFAULT_MAINTENANCE_WINDOW_HOURS: Final = 12
 
-# Domains we never mirror (noise / local-only / security)
+# Domains we never mirror (noise / local-only)
 DEFAULT_EXCLUDE_DOMAINS: Final = frozenset(
     {
         "persistent_notification",
@@ -54,16 +54,13 @@ DEFAULT_EXCLUDE_DOMAINS: Final = frozenset(
         "person",
         "device_tracker",
         "sun",
-        "weather",
         "conversation",
         "assist_pipeline",
         "stt",
         "tts",
         "wake_word",
         "notify",
-        "tts",
         "update",
-        "button",  # can be enabled later if needed
     }
 )
 
