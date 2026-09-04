@@ -1,11 +1,6 @@
 """Connection management for a remote Home Assistant instance.
 
-Implements real WebSocket entity mirroring:
-  - Authenticate with long-lived access token
-  - Fetch all states (get_states)
-  - Subscribe to state_changed events
-  - Mirror entities locally with optional prefix
-  - Clean up on disconnect / reconnect with backoff
+WebSocket entity mirroring + REST service/automation control.
 """
 
 from __future__ import annotations
@@ -18,8 +13,8 @@ from urllib.parse import urlparse
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_CALL_SERVICE, EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
@@ -53,6 +48,7 @@ from .const import (
     DEFAULT_EXCLUDE_DOMAINS,
     DEFAULT_PORT,
     DOMAIN,
+    PROXY_SERVICE_DOMAINS,
     RECONNECT_MAX_DELAY,
     RECONNECT_MIN_DELAY,
     SIGNAL_CONNECTION_UPDATE,
@@ -77,8 +73,12 @@ class BridgeConnection:
         self._msg_id = 1
         self._pending: dict[int, asyncio.Future] = {}
         self._mirrored_entities: set[str] = set()
+        self._local_to_remote: dict[str, str] = {}
+        self._automation_configs: dict[str, dict[str, Any]] = {}
         self._stop = False
         self._last_error: str | None = None
+        self._proxying: set[str] = set()
+        self._service_unsub = None
 
         self.property_name: str = entry.data.get(
             CONF_PROPERTY_NAME, entry.title or "Unknown Property"
@@ -164,7 +164,6 @@ class BridgeConnection:
             if parsed.port:
                 port = parsed.port
         host = host.split("/")[0].split("?")[0].rstrip("/")
-
         host_l = host.lower()
         if host_l.endswith(".ui.nabu.casa") or host_l.endswith(".nabu.casa"):
             secure = True
@@ -173,7 +172,6 @@ class BridgeConnection:
             None, 8123, DEFAULT_PORT
         ):
             port = 443
-
         if port is None:
             port = 443 if secure else DEFAULT_PORT
         return host, secure, int(port)
@@ -189,7 +187,6 @@ class BridgeConnection:
                 self.hass, self.property_name, self.label_id
             )
 
-        # Defer options write so it does not reload platforms mid-setup
         if self.area_id or self.label_id:
             new_options = dict(self.entry.options)
             changed = False
@@ -207,11 +204,8 @@ class BridgeConnection:
                         self.hass.config_entries.async_update_entry(
                             self.entry, options=new_options
                         )
-                    except Exception:  # pylint: disable=broad-except
-                        _LOGGER.debug(
-                            "Could not persist area/label options for '%s'",
-                            self.property_name,
-                        )
+                    except Exception:
+                        pass
 
                 self.hass.async_create_task(_persist_options())
 
@@ -220,6 +214,13 @@ class BridgeConnection:
             self._connection_loop(),
             name=f"property_bridge_{self.property_name}",
         )
+
+        if self._service_unsub is None:
+            self._service_unsub = self.hass.bus.async_listen(
+                EVENT_CALL_SERVICE, self._on_local_service_call
+            )
+            self.entry.async_on_unload(self._service_unsub)
+
         self.entry.async_on_unload(
             self.hass.bus.async_listen_once(
                 EVENT_HOMEASSISTANT_STOP, self._on_hass_stop
@@ -255,6 +256,14 @@ class BridgeConnection:
         if not self.secure and self.port == 80:
             return f"{scheme}://{self.host}/api/websocket"
         return f"{scheme}://{self.host}:{self.port}/api/websocket"
+
+    def _rest_base(self) -> str:
+        scheme = "https" if self.secure else "http"
+        if self.secure and self.port == 443:
+            return f"{scheme}://{self.host}"
+        if not self.secure and self.port == 80:
+            return f"{scheme}://{self.host}"
+        return f"{scheme}://{self.host}:{self.port}"
 
     async def _connection_loop(self) -> None:
         delay = RECONNECT_MIN_DELAY
@@ -395,10 +404,6 @@ class BridgeConnection:
     async def _send_command(
         self, ws: aiohttp.ClientWebSocketResponse, cmd_type: str, **kwargs: Any
     ) -> Any:
-        """Send a WS command and pump messages until the matching result arrives.
-
-        The result is delivered on the same socket, so we must receive while waiting.
-        """
         msg_id = self._msg_id
         self._msg_id += 1
         fut: asyncio.Future = self.hass.loop.create_future()
@@ -433,7 +438,7 @@ class BridgeConnection:
                     continue
                 try:
                     data = raw.json()
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     continue
                 await self._handle_message(data)
 
@@ -492,9 +497,11 @@ class BridgeConnection:
             attrs["friendly_name"] = f"{self.friendly_name_prefix}{original}"
         attrs["property_bridge_remote"] = self.property_name
         attrs["property_bridge_remote_entity_id"] = remote_eid
+        attrs["property_bridge_entry_id"] = self.entry.entry_id
         try:
             self.hass.states.async_set(local_eid, state.get("state"), attrs)
             self._mirrored_entities.add(local_eid)
+            self._local_to_remote[local_eid] = remote_eid
             self._entity_count = len(self._mirrored_entities)
         except Exception as err:
             _LOGGER.debug("Failed to set state for %s: %s", local_eid, err)
@@ -504,6 +511,7 @@ class BridgeConnection:
         if local_eid in self._mirrored_entities:
             self.hass.states.async_remove(local_eid)
             self._mirrored_entities.discard(local_eid)
+            self._local_to_remote.pop(local_eid, None)
             self._entity_count = len(self._mirrored_entities)
             self._notify_update()
 
@@ -514,7 +522,168 @@ class BridgeConnection:
             except Exception:
                 pass
         self._mirrored_entities.clear()
+        self._local_to_remote.clear()
         self._entity_count = 0
+
+    @callback
+    def _on_local_service_call(self, event: Event) -> None:
+        if not self._connected or self._stop:
+            return
+        domain = event.data.get("domain")
+        service = event.data.get("service")
+        if not domain or not service or domain not in PROXY_SERVICE_DOMAINS:
+            return
+        service_data = dict(event.data.get("service_data") or {})
+        entity_ids = service_data.get("entity_id")
+        if entity_ids is None:
+            return
+        if isinstance(entity_ids, str):
+            entity_ids = [entity_ids]
+        remote_ids: list[str] = []
+        for eid in entity_ids:
+            if eid in self._proxying:
+                continue
+            remote = self._local_to_remote.get(eid)
+            if remote:
+                remote_ids.append(remote)
+        if not remote_ids:
+            return
+        self.hass.async_create_task(
+            self._forward_service(domain, service, service_data, remote_ids)
+        )
+
+    async def _forward_service(
+        self,
+        domain: str,
+        service: str,
+        service_data: dict[str, Any],
+        remote_ids: list[str],
+    ) -> None:
+        data = {k: v for k, v in service_data.items() if k != "entity_id"}
+        data["entity_id"] = remote_ids if len(remote_ids) > 1 else remote_ids[0]
+        key = f"{domain}.{service}:{','.join(remote_ids)}"
+        self._proxying.add(key)
+        for rid in remote_ids:
+            self._proxying.add(rid)
+        try:
+            await self.async_call_remote_service(domain, service, data)
+            _LOGGER.debug(
+                "Forwarded %s.%s → %s on '%s'",
+                domain, service, remote_ids, self.property_name,
+            )
+        except Exception as err:
+            _LOGGER.warning(
+                "Failed to forward %s.%s to '%s': %s",
+                domain, service, self.property_name, err,
+            )
+        finally:
+            self._proxying.discard(key)
+            for rid in remote_ids:
+                self._proxying.discard(rid)
+
+    async def async_call_remote_service(
+        self, domain: str, service: str, data: dict[str, Any] | None = None
+    ) -> Any:
+        if not self._connected:
+            raise RuntimeError(f"Not connected to '{self.property_name}'")
+        session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
+        url = f"{self._rest_base()}/api/services/{domain}/{service}"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        async with session.post(
+            url,
+            headers=headers,
+            json=data or {},
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            if resp.status >= 400:
+                text = await resp.text()
+                raise RuntimeError(
+                    f"Remote service {domain}.{service} failed ({resp.status}): {text}"
+                )
+            try:
+                return await resp.json()
+            except Exception:
+                return None
+
+    async def async_list_automations(self) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for local_eid, remote_eid in self._local_to_remote.items():
+            if not remote_eid.startswith("automation."):
+                continue
+            state = self.hass.states.get(local_eid)
+            attrs = dict(state.attributes) if state else {}
+            result.append(
+                {
+                    "local_entity_id": local_eid,
+                    "remote_entity_id": remote_eid,
+                    "state": state.state if state else None,
+                    "friendly_name": attrs.get("friendly_name"),
+                    "automation_id": attrs.get("id"),
+                    "last_triggered": attrs.get("last_triggered"),
+                    "entry_id": self.entry.entry_id,
+                    "property_name": self.property_name,
+                }
+            )
+        return result
+
+    async def async_get_automation_config(
+        self, automation_id: str
+    ) -> dict[str, Any]:
+        automation_id = automation_id.removeprefix("automation.")
+        session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
+        url = f"{self._rest_base()}/api/config/automation/config/{automation_id}"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        async with session.get(
+            url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)
+        ) as resp:
+            if resp.status == 404:
+                raise RuntimeError(
+                    f"Automation '{automation_id}' not found on remote "
+                    f"(use the automation unique id attribute)"
+                )
+            if resp.status >= 400:
+                text = await resp.text()
+                raise RuntimeError(
+                    f"Failed to get automation config ({resp.status}): {text}"
+                )
+            config = await resp.json()
+        self._automation_configs[automation_id] = config
+        return config
+
+    async def async_update_automation_config(
+        self, automation_id: str, config: dict[str, Any]
+    ) -> dict[str, Any]:
+        automation_id = automation_id.removeprefix("automation.")
+        session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
+        url = f"{self._rest_base()}/api/config/automation/config/{automation_id}"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        async with session.post(
+            url,
+            headers=headers,
+            json=config,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            if resp.status >= 400:
+                text = await resp.text()
+                raise RuntimeError(
+                    f"Failed to update automation config ({resp.status}): {text}"
+                )
+            try:
+                result = await resp.json()
+            except Exception:
+                result = {"result": "ok"}
+        self._automation_configs[automation_id] = config
+        _LOGGER.info(
+            "Updated automation '%s' on property '%s'",
+            automation_id, self.property_name,
+        )
+        return result if isinstance(result, dict) else {"result": "ok"}
 
     @callback
     def _notify_update(self) -> None:
