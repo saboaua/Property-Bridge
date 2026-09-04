@@ -99,7 +99,7 @@ class BridgeConnection:
             entry.data.get(CONF_FRIENDLY_NAME_PREFIX, "") or ""
         )
 
-        # Fix cloud hosts saved with port 8123 (need 443)
+        # In-memory only normalization (never write back during WS session)
         self.host, self.secure, self.port = self._normalize_endpoint(
             self.host, self.secure, self.port
         )
@@ -171,10 +171,18 @@ class BridgeConnection:
             if parsed.port:
                 port = parsed.port
         host = host.split("/")[0].split("?")[0].rstrip("/")
-        if any(host.lower().endswith(s) for s in _CLOUD_SUFFIXES):
+
+        host_l = host.lower()
+        # Nabu Casa always on 443
+        if host_l.endswith(".ui.nabu.casa") or host_l.endswith(".nabu.casa"):
             secure = True
-            if port in (None, 8123, DEFAULT_PORT):
-                port = 443
+            port = 443
+        # DuckDNS: only remap default local port when Secure is on
+        elif host_l.endswith(".duckdns.org") and secure and port in (
+            None, 8123, DEFAULT_PORT
+        ):
+            port = 443
+
         if port is None:
             port = 443 if secure else DEFAULT_PORT
         return host, secure, int(port)
@@ -195,15 +203,20 @@ class BridgeConnection:
                 self.hass, self.property_name, self.label_id
             )
 
+        # Persist area/label ids only when newly created (options, not data)
         if self.area_id or self.label_id:
             new_options = dict(self.entry.options)
-            if self.area_id:
+            changed = False
+            if self.area_id and new_options.get(CONF_AREA_ID) != self.area_id:
                 new_options[CONF_AREA_ID] = self.area_id
-            if self.label_id:
+                changed = True
+            if self.label_id and new_options.get(CONF_LABEL_ID) != self.label_id:
                 new_options[CONF_LABEL_ID] = self.label_id
-            self.hass.config_entries.async_update_entry(
-                self.entry, options=new_options
-            )
+                changed = True
+            if changed:
+                self.hass.config_entries.async_update_entry(
+                    self.entry, options=new_options
+                )
 
         self._stop = False
         self._ws_task = self.hass.async_create_background_task(
@@ -272,22 +285,7 @@ class BridgeConnection:
             self._notify_update()
 
     async def _run_session(self) -> None:
-        # Persist corrected cloud endpoint into the config entry
-        data = dict(self.entry.data)
-        if (
-            data.get(CONF_HOST) != self.host
-            or data.get(CONF_PORT) != self.port
-            or data.get(CONF_SECURE) != self.secure
-        ):
-            data[CONF_HOST] = self.host
-            data[CONF_PORT] = self.port
-            data[CONF_SECURE] = self.secure
-            self.hass.config_entries.async_update_entry(self.entry, data=data)
-            _LOGGER.info(
-                "Updated entry endpoint for '%s' → %s:%s secure=%s",
-                self.property_name, self.host, self.port, self.secure,
-            )
-
+        # Do NOT call async_update_entry here — it triggers a reload loop.
         session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
         url = self._ws_url()
         _LOGGER.info("Opening WebSocket to %s for property '%s'", url, self.property_name)
