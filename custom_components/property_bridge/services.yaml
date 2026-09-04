@@ -1,0 +1,63 @@
+apply_checkin_preset:
+  name: Apply check-in preset
+  description: Run the configured check-in script and/or scene for a property.
+  fields:
+    entry_id:
+      name: Property entry ID
+      description: Config entry ID of the Property Bridge property (from the device or integration page).
+      required: true
+      selector:
+        text:
+
+apply_checkout_preset:
+  name: Apply check-out preset
+  description: Run the configured check-out script and/or scene for a property.
+  fields:
+    entry_id:
+      name: Property entry ID
+      description: Config entry ID of the Property Bridge property.
+      required: true
+      selector:
+        text:
+
+request_maintenance_window:
+  name: Request maintenance window
+  description: Open a time-limited maintenance window for a property (respects consent setting).
+  fields:
+    entry_id:
+      name: Property entry ID
+      description: Config entry ID of the Property Bridge property.
+      required: true
+      selector:
+        text:
+    hours:
+      name: Duration (hours)
+      description: How long the maintenance window should stay open. Defaults to the value configured in options.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 168
+          unit_of_measurement: hours
+
+end_maintenance_window:
+  name: End maintenance window
+  description: Close the maintenance window and revoke consent for a property.
+  fields:
+    entry_id:
+      name: Property entry ID
+      description: Config entry ID of the Property Bridge property.
+      required: true
+      selector:
+        text:
+
+grant_maintenance_consent:
+  name: Grant maintenance consent
+  description: Grant consent so a maintenance window can be opened (multi-tenant safety).
+  fields:
+    entry_id:
+      name: Property entry ID
+      description: Config entry ID of the Property Bridge property.
+      required: true
+      selector:
+        text:
