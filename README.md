@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" alt="Home Assistant Bridge" width="180">
+  <img src="brand/logo.png" alt="Property Bridge" width="180">
 </p>
 
 <h1 align="center">Property Bridge</h1>
@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="images/logo-banner.png" alt="Home Assistant Bridge banner" width="420">
+  <img src="brand/logo@2x.png" alt="Property Bridge banner" width="420">
 </p>
 
 One central portal for every property. View and control smart devices, run automations, and monitor connection health across your entire portfolio — built for Airbnb hosts, vacation rental managers, and multi-home owners.
@@ -206,6 +206,18 @@ Connection Status also exposes attributes such as `ws_url`, `last_error`, `host`
 - [ ] Include / exclude domain & entity filters in options UI
 - [ ] Bulk health dashboard card
 - [ ] Deeper calendar integration (auto entry_id lookup)
+
+---
+
+## Brand assets
+
+Logos and icons live in [`brand/`](brand/):
+
+- `brand/icon.png` — integration icon
+- `brand/logo.png` — square logo
+- `brand/logo@2x.png` — wide banner
+
+To show the icon inside Home Assistant, submit them to [home-assistant/brands](https://github.com/home-assistant/brands) under `custom_integrations/property_bridge/`.
 
 ---
 
