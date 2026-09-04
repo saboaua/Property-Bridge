@@ -98,3 +98,32 @@ automation:
 - Install [Tailscale](https://tailscale.com/) (or Headscale) on every Home Assistant instance.
 - Use the Tailscale hostname as the `host` value — works behind CGNAT, no open ports required.
 - Apply ACLs so only the central management instance (and authorized users) can reach the property instances.
+
+## Roadmap
+
+- [x] HACS-compatible structure & config flow
+- [x] Connection status sensors
+- [x] Automatic area / label assignment per property
+- [x] Rental calendar helpers (check-in / check-out presets)
+- [x] Maintenance windows / consent (multi-tenant foundation)
+- [ ] Full WebSocket state mirroring + service call forwarding
+- [ ] Include / exclude domain & entity filters
+- [ ] Bulk health dashboard
+- [ ] Deeper calendar integration (auto entry_id lookup)
+
+## Development
+
+```bash
+git clone https://github.com/saboaua/Property-Bridge.git
+```
+
+Use `pytest-homeassistant-custom-component` for tests.
+
+## Credits & Inspiration
+
+Inspired by the community component [remote_homeassistant](https://github.com/custom-components/remote_homeassistant).  
+Built for people managing smart vacation rentals and multi-property portfolios with Home Assistant.
+
+## License
+
+MIT License – see [LICENSE](LICENSE)

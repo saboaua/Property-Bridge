@@ -14,11 +14,25 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_CHECKIN_SCENE,
+    CONF_CHECKIN_SCRIPT,
+    CONF_CHECKOUT_SCENE,
+    CONF_CHECKOUT_SCRIPT,
+    CONF_CREATE_AREA,
+    CONF_CREATE_LABEL,
     CONF_ENTITY_PREFIX,
     CONF_FRIENDLY_NAME_PREFIX,
+    CONF_MAINTENANCE_ENABLED,
+    CONF_MAINTENANCE_REQUIRE_CONSENT,
+    CONF_MAINTENANCE_WINDOW_HOURS,
     CONF_PROPERTY_NAME,
     CONF_SECURE,
     CONF_VERIFY_SSL,
+    DEFAULT_CREATE_AREA,
+    DEFAULT_CREATE_LABEL,
+    DEFAULT_MAINTENANCE_ENABLED,
+    DEFAULT_MAINTENANCE_REQUIRE_CONSENT,
+    DEFAULT_MAINTENANCE_WINDOW_HOURS,
     DEFAULT_PORT,
     DEFAULT_SECURE,
     DEFAULT_VERIFY_SSL,
@@ -37,6 +51,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
         vol.Optional(CONF_ENTITY_PREFIX, default=""): str,
         vol.Optional(CONF_FRIENDLY_NAME_PREFIX, default=""): str,
+        vol.Optional(CONF_CREATE_AREA, default=DEFAULT_CREATE_AREA): bool,
+        vol.Optional(CONF_CREATE_LABEL, default=DEFAULT_CREATE_LABEL): bool,
     }
 )
 
@@ -44,11 +60,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 async def validate_connection(
     hass: HomeAssistant, data: dict[str, Any]
 ) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Returns info that can be stored in the config entry.
-    Raises an exception if connection fails.
-    """
+    """Validate the user input allows us to connect."""
     session = async_get_clientsession(hass)
     scheme = "https" if data.get(CONF_SECURE, True) else "http"
     url = f"{scheme}://{data[CONF_HOST]}:{data.get(CONF_PORT, DEFAULT_PORT)}/api/"
@@ -138,6 +150,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         options_schema = vol.Schema(
             {
+                # Connection / naming
                 vol.Optional(
                     CONF_ENTITY_PREFIX,
                     default=data.get(CONF_ENTITY_PREFIX, ""),
@@ -154,6 +167,53 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_VERIFY_SSL,
                     default=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
                 ): bool,
+                # Area / label
+                vol.Optional(
+                    CONF_CREATE_AREA,
+                    default=data.get(CONF_CREATE_AREA, DEFAULT_CREATE_AREA),
+                ): bool,
+                vol.Optional(
+                    CONF_CREATE_LABEL,
+                    default=data.get(CONF_CREATE_LABEL, DEFAULT_CREATE_LABEL),
+                ): bool,
+                # Rental presets
+                vol.Optional(
+                    CONF_CHECKIN_SCRIPT,
+                    default=data.get(CONF_CHECKIN_SCRIPT, ""),
+                ): str,
+                vol.Optional(
+                    CONF_CHECKOUT_SCRIPT,
+                    default=data.get(CONF_CHECKOUT_SCRIPT, ""),
+                ): str,
+                vol.Optional(
+                    CONF_CHECKIN_SCENE,
+                    default=data.get(CONF_CHECKIN_SCENE, ""),
+                ): str,
+                vol.Optional(
+                    CONF_CHECKOUT_SCENE,
+                    default=data.get(CONF_CHECKOUT_SCENE, ""),
+                ): str,
+                # Maintenance / consent
+                vol.Optional(
+                    CONF_MAINTENANCE_ENABLED,
+                    default=data.get(
+                        CONF_MAINTENANCE_ENABLED, DEFAULT_MAINTENANCE_ENABLED
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_MAINTENANCE_REQUIRE_CONSENT,
+                    default=data.get(
+                        CONF_MAINTENANCE_REQUIRE_CONSENT,
+                        DEFAULT_MAINTENANCE_REQUIRE_CONSENT,
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_MAINTENANCE_WINDOW_HOURS,
+                    default=data.get(
+                        CONF_MAINTENANCE_WINDOW_HOURS,
+                        DEFAULT_MAINTENANCE_WINDOW_HOURS,
+                    ),
+                ): int,
             }
         )
 

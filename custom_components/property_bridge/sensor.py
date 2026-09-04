@@ -24,6 +24,11 @@ SENSOR_TYPES: tuple[SensorEntityDescription, ...] = (
         icon="mdi:counter",
         native_unit_of_measurement="entities",
     ),
+    SensorEntityDescription(
+        key="maintenance_until",
+        name="Maintenance Until",
+        icon="mdi:calendar-clock",
+    ),
 )
 
 
@@ -97,6 +102,8 @@ class BridgeConnectionSensor(SensorEntity):
             )
         elif self.entity_description.key == "entity_count":
             self._attr_native_value = data["entity_count"]
+        elif self.entity_description.key == "maintenance_until":
+            self._attr_native_value = data.get("maintenance_until") or "None"
 
         self._attr_extra_state_attributes = {
             "property_name": data["property_name"],
@@ -104,5 +111,10 @@ class BridgeConnectionSensor(SensorEntity):
             "port": data["port"],
             "last_seen": data["last_seen"],
             "remote_version": data["remote_version"],
+            "area_id": data.get("area_id"),
+            "label_id": data.get("label_id"),
+            "maintenance_allowed": data.get("maintenance_allowed"),
+            "consent_granted": data.get("consent_granted"),
+            "maintenance_requested": data.get("maintenance_requested"),
         }
         self.async_write_ha_state()

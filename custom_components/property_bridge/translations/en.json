@@ -12,7 +12,9 @@
           "secure": "Use HTTPS / WSS (secure)",
           "verify_ssl": "Verify SSL certificate",
           "entity_prefix": "Entity ID prefix (e.g. aruba01_)",
-          "friendly_name_prefix": "Friendly name prefix (e.g. Aruba 01 )"
+          "friendly_name_prefix": "Friendly name prefix (e.g. Aruba 01 )",
+          "create_area": "Automatically create Area for this property",
+          "create_label": "Automatically create Label for this property"
         }
       }
     },
@@ -32,9 +34,40 @@
           "entity_prefix": "Entity ID prefix",
           "friendly_name_prefix": "Friendly name prefix",
           "secure": "Use HTTPS / WSS",
-          "verify_ssl": "Verify SSL certificate"
+          "verify_ssl": "Verify SSL certificate",
+          "create_area": "Create / keep Area for this property",
+          "create_label": "Create / keep Label for this property",
+          "checkin_script": "Check-in script entity_id (optional)",
+          "checkout_script": "Check-out script entity_id (optional)",
+          "checkin_scene": "Check-in scene entity_id (optional)",
+          "checkout_scene": "Check-out scene entity_id (optional)",
+          "maintenance_enabled": "Enable maintenance window feature",
+          "maintenance_require_consent": "Require consent before opening maintenance window",
+          "maintenance_window_hours": "Default maintenance window duration (hours)"
         }
       }
+    }
+  },
+  "services": {
+    "apply_checkin_preset": {
+      "name": "Apply check-in preset",
+      "description": "Run the configured check-in script and/or scene for a property."
+    },
+    "apply_checkout_preset": {
+      "name": "Apply check-out preset",
+      "description": "Run the configured check-out script and/or scene for a property."
+    },
+    "request_maintenance_window": {
+      "name": "Request maintenance window",
+      "description": "Open a time-limited maintenance window for a property."
+    },
+    "end_maintenance_window": {
+      "name": "End maintenance window",
+      "description": "Close the maintenance window and revoke consent."
+    },
+    "grant_maintenance_consent": {
+      "name": "Grant maintenance consent",
+      "description": "Grant consent so a maintenance window can be opened."
     }
   }
 }
