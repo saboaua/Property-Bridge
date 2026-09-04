@@ -1,4 +1,12 @@
-"""Connection management for a remote Home Assistant instance."""
+"""Connection management for a remote Home Assistant instance.
+
+Implements real WebSocket entity mirroring:
+  - Authenticate with long-lived access token
+  - Fetch all states (get_states)
+  - Subscribe to state_changed events
+  - Mirror entities locally with optional prefix
+  - Clean up on disconnect / reconnect with backoff
+"""
 
 from __future__ import annotations
 
@@ -7,8 +15,11 @@ import logging
 from datetime import datetime
 from typing import Any
 
+import aiohttp
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
@@ -26,8 +37,10 @@ from .const import (
     CONF_CREATE_AREA,
     CONF_CREATE_LABEL,
     CONF_ENTITY_PREFIX,
+    CONF_EXCLUDE_DOMAINS,
     CONF_FRIENDLY_NAME_PREFIX,
     CONF_HOST,
+    CONF_INCLUDE_DOMAINS,
     CONF_LABEL_ID,
     CONF_MAINTENANCE_ALLOWED_UNTIL,
     CONF_PORT,
@@ -36,8 +49,11 @@ from .const import (
     CONF_VERIFY_SSL,
     DEFAULT_CREATE_AREA,
     DEFAULT_CREATE_LABEL,
+    DEFAULT_EXCLUDE_DOMAINS,
     DEFAULT_PORT,
     DOMAIN,
+    RECONNECT_MAX_DELAY,
+    RECONNECT_MIN_DELAY,
     SIGNAL_CONNECTION_UPDATE,
 )
 from .helpers import async_ensure_area, async_ensure_label
@@ -60,7 +76,11 @@ class BridgeConnection:
         self._entity_count = 0
         self._remote_version: str | None = None
         self._ws_task: asyncio.Task | None = None
-        self._entities: dict[str, Any] = {}
+        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._msg_id = 1
+        self._pending: dict[int, asyncio.Future] = {}
+        self._mirrored_entities: set[str] = set()
+        self._stop = False
 
         self.property_name: str = entry.data.get(
             CONF_PROPERTY_NAME, entry.title or "Unknown Property"
@@ -70,10 +90,21 @@ class BridgeConnection:
         self.secure: bool = entry.data.get(CONF_SECURE, True)
         self.verify_ssl: bool = entry.data.get(CONF_VERIFY_SSL, True)
         self.access_token: str = entry.data[CONF_ACCESS_TOKEN]
-        self.entity_prefix: str = entry.data.get(CONF_ENTITY_PREFIX, "")
-        self.friendly_name_prefix: str = entry.data.get(CONF_FRIENDLY_NAME_PREFIX, "")
+        self.entity_prefix: str = entry.data.get(CONF_ENTITY_PREFIX, "") or ""
+        self.friendly_name_prefix: str = (
+            entry.data.get(CONF_FRIENDLY_NAME_PREFIX, "") or ""
+        )
 
-        # Area / label
+        options = {**entry.data, **entry.options}
+        include = options.get(CONF_INCLUDE_DOMAINS)
+        exclude = options.get(CONF_EXCLUDE_DOMAINS)
+        self._include_domains: set[str] | None = (
+            set(include) if include else None
+        )
+        self._exclude_domains: set[str] = (
+            set(exclude) if exclude else set(DEFAULT_EXCLUDE_DOMAINS)
+        )
+
         self.area_id: str | None = entry.options.get(CONF_AREA_ID) or entry.data.get(
             CONF_AREA_ID
         )
@@ -81,7 +112,6 @@ class BridgeConnection:
             CONF_LABEL_ID
         )
 
-        # Maintenance / consent state
         self.maintenance_requested: bool = False
         self.consent_granted: bool = False
         self.maintenance_allowed_until: datetime | None = None
@@ -99,41 +129,32 @@ class BridgeConnection:
 
     @property
     def connected(self) -> bool:
-        """Return True if currently connected to the remote instance."""
         return self._connected
 
     @property
     def last_seen(self) -> datetime | None:
-        """Return the last successful communication timestamp."""
         return self._last_seen
 
     @property
     def entity_count(self) -> int:
-        """Return the number of mirrored entities."""
         return self._entity_count
 
     @property
     def remote_version(self) -> str | None:
-        """Return the Home Assistant version reported by the remote instance."""
         return self._remote_version
 
     @property
     def maintenance_allowed(self) -> bool:
-        """Return True if a valid maintenance window is currently open."""
         if not self.maintenance_allowed_until:
             return False
         return self.maintenance_allowed_until > dt_util.utcnow()
 
     async def async_connect(self) -> None:
-        """Establish the connection and ensure area/label exist."""
         _LOGGER.debug(
             "Connecting to remote HA at %s:%s (property: %s)",
-            self.host,
-            self.port,
-            self.property_name,
+            self.host, self.port, self.property_name,
         )
 
-        # --- Automatic area / label assignment ---
         options = {**self.entry.data, **self.entry.options}
         create_area = options.get(CONF_CREATE_AREA, DEFAULT_CREATE_AREA)
         create_label = options.get(CONF_CREATE_LABEL, DEFAULT_CREATE_LABEL)
@@ -147,7 +168,6 @@ class BridgeConnection:
                 self.hass, self.property_name, self.label_id
             )
 
-        # Persist area/label ids back into options
         if self.area_id or self.label_id:
             new_options = dict(self.entry.options)
             if self.area_id:
@@ -158,34 +178,29 @@ class BridgeConnection:
                 self.entry, options=new_options
             )
 
-        # ------------------------------------------------------------------
-        # TODO: Real WebSocket implementation
-        # ------------------------------------------------------------------
-
-        self._connected = True
-        self._last_seen = datetime.now()
-        self._remote_version = "skeleton"
-        self._entity_count = 0
-
-        self._notify_update()
-
+        self._stop = False
         self._ws_task = self.hass.async_create_background_task(
             self._connection_loop(),
             name=f"property_bridge_{self.property_name}",
         )
 
+        self.entry.async_on_unload(
+            self.hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP, self._on_hass_stop
+            )
+        )
+
         _LOGGER.info(
-            "Property Bridge connected to '%s' (%s:%s) area=%s label=%s",
-            self.property_name,
-            self.host,
-            self.port,
-            self.area_id,
-            self.label_id,
+            "Property Bridge starting connection to '%s' (%s:%s) area=%s label=%s",
+            self.property_name, self.host, self.port, self.area_id, self.label_id,
         )
 
     async def async_disconnect(self) -> None:
-        """Cleanly disconnect and remove all mirrored entities."""
         _LOGGER.debug("Disconnecting from '%s'", self.property_name)
+        self._stop = True
+
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
 
         if self._ws_task and not self._ws_task.done():
             self._ws_task.cancel()
@@ -194,44 +209,223 @@ class BridgeConnection:
             except asyncio.CancelledError:
                 pass
 
+        await self._clear_mirrored_entities()
         self._connected = False
         self._entity_count = 0
         self._notify_update()
-
         _LOGGER.info("Property Bridge disconnected from '%s'", self.property_name)
 
+    async def _on_hass_stop(self, _event) -> None:
+        await self.async_disconnect()
+
+    def _ws_url(self) -> str:
+        scheme = "wss" if self.secure else "ws"
+        return f"{scheme}://{self.host}:{self.port}/api/websocket"
+
     async def _connection_loop(self) -> None:
-        """Background task that maintains the WebSocket connection."""
+        delay = RECONNECT_MIN_DELAY
         try:
-            while True:
-                await asyncio.sleep(30)
-                if self._connected:
-                    self._last_seen = datetime.now()
-                    # Expire maintenance window automatically
-                    if (
-                        self.maintenance_allowed_until
-                        and self.maintenance_allowed_until <= dt_util.utcnow()
-                    ):
-                        self.maintenance_allowed_until = None
-                        self.maintenance_requested = False
-                        self.consent_granted = False
+            while not self._stop:
+                try:
+                    await self._run_session()
+                    delay = RECONNECT_MIN_DELAY
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:
+                    _LOGGER.warning(
+                        "WebSocket session for '%s' ended: %s – reconnecting in %ss",
+                        self.property_name, err, delay,
+                    )
+                    self._connected = False
                     self._notify_update()
+                    await self._clear_mirrored_entities()
+
+                if self._stop:
+                    break
+
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, RECONNECT_MAX_DELAY)
         except asyncio.CancelledError:
-            _LOGGER.debug(
-                "Connection loop for '%s' cancelled", self.property_name
-            )
+            _LOGGER.debug("Connection loop for '%s' cancelled", self.property_name)
             raise
+        finally:
+            await self._clear_mirrored_entities()
+            self._connected = False
+            self._notify_update()
+
+    async def _run_session(self) -> None:
+        session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
+        url = self._ws_url()
+        _LOGGER.info("Opening WebSocket to %s for property '%s'", url, self.property_name)
+
+        async with session.ws_connect(
+            url, heartbeat=30, timeout=aiohttp.ClientTimeout(total=30),
+        ) as ws:
+            self._ws = ws
+            self._msg_id = 1
+            self._pending.clear()
+
+            msg = await ws.receive_json()
+            if msg.get("type") != "auth_required":
+                raise RuntimeError(f"Expected auth_required, got: {msg}")
+
+            await ws.send_json({"type": "auth", "access_token": self.access_token})
+            msg = await ws.receive_json()
+            if msg.get("type") != "auth_ok":
+                raise RuntimeError(f"Auth failed: {msg.get('message', msg)}")
+
+            self._remote_version = msg.get("ha_version", "unknown")
+            self._connected = True
+            self._last_seen = dt_util.utcnow()
+            self._notify_update()
+            _LOGGER.info(
+                "Authenticated to '%s' (HA %s)",
+                self.property_name, self._remote_version,
+            )
+
+            states = await self._send_command(ws, "get_states")
+            if isinstance(states, list):
+                for state in states:
+                    self._apply_remote_state(state)
+                self._entity_count = len(self._mirrored_entities)
+                self._notify_update()
+                _LOGGER.info(
+                    "Mirrored %s entities from '%s'",
+                    self._entity_count, self.property_name,
+                )
+
+            await self._send_command(ws, "subscribe_events", event_type="state_changed")
+
+            async for raw in ws:
+                if self._stop:
+                    break
+                if raw.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    break
+                if raw.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                try:
+                    data = raw.json()
+                except Exception:
+                    continue
+
+                self._last_seen = dt_util.utcnow()
+                await self._handle_message(data)
+
+                if (
+                    self.maintenance_allowed_until
+                    and self.maintenance_allowed_until <= dt_util.utcnow()
+                ):
+                    self.maintenance_allowed_until = None
+                    self.maintenance_requested = False
+                    self.consent_granted = False
+                    self._notify_update()
+
+    async def _send_command(
+        self, ws: aiohttp.ClientWebSocketResponse, cmd_type: str, **kwargs: Any
+    ) -> Any:
+        msg_id = self._msg_id
+        self._msg_id += 1
+        payload = {"id": msg_id, "type": cmd_type, **kwargs}
+        fut: asyncio.Future = self.hass.loop.create_future()
+        self._pending[msg_id] = fut
+        await ws.send_json(payload)
+        try:
+            return await asyncio.wait_for(fut, timeout=30)
+        finally:
+            self._pending.pop(msg_id, None)
+
+    async def _handle_message(self, data: dict[str, Any]) -> None:
+        msg_type = data.get("type")
+
+        if msg_type == "result":
+            msg_id = data.get("id")
+            fut = self._pending.get(msg_id)
+            if fut and not fut.done():
+                if data.get("success"):
+                    fut.set_result(data.get("result"))
+                else:
+                    fut.set_exception(
+                        RuntimeError(str(data.get("error", "unknown error")))
+                    )
+            return
+
+        if msg_type == "event":
+            event = data.get("event") or {}
+            if event.get("event_type") == "state_changed":
+                event_data = event.get("data") or {}
+                new_state = event_data.get("new_state")
+                entity_id = event_data.get("entity_id")
+                if new_state is None and entity_id:
+                    self._remove_local_entity(entity_id)
+                elif new_state:
+                    self._apply_remote_state(new_state)
+            return
+
+    def _should_mirror(self, entity_id: str) -> bool:
+        if not entity_id or "." not in entity_id:
+            return False
+        domain = entity_id.split(".", 1)[0]
+        if domain in self._exclude_domains:
+            return False
+        if self._include_domains is not None and domain not in self._include_domains:
+            return False
+        if domain == DOMAIN:
+            return False
+        return True
+
+    def _local_entity_id(self, remote_entity_id: str) -> str:
+        domain, object_id = remote_entity_id.split(".", 1)
+        if self.entity_prefix:
+            object_id = f"{self.entity_prefix}{object_id}"
+        return f"{domain}.{object_id}"
+
+    def _apply_remote_state(self, state: dict[str, Any]) -> None:
+        remote_eid = state.get("entity_id")
+        if not remote_eid or not self._should_mirror(remote_eid):
+            return
+
+        local_eid = self._local_entity_id(remote_eid)
+        attrs = dict(state.get("attributes") or {})
+
+        if self.friendly_name_prefix:
+            original = attrs.get("friendly_name") or remote_eid
+            attrs["friendly_name"] = f"{self.friendly_name_prefix}{original}"
+
+        attrs["property_bridge_remote"] = self.property_name
+        attrs["property_bridge_remote_entity_id"] = remote_eid
+
+        try:
+            self.hass.states.async_set(local_eid, state.get("state"), attrs)
+            self._mirrored_entities.add(local_eid)
+            self._entity_count = len(self._mirrored_entities)
+        except Exception as err:
+            _LOGGER.debug("Failed to set state for %s: %s", local_eid, err)
+
+    def _remove_local_entity(self, remote_entity_id: str) -> None:
+        local_eid = self._local_entity_id(remote_entity_id)
+        if local_eid in self._mirrored_entities:
+            self.hass.states.async_remove(local_eid)
+            self._mirrored_entities.discard(local_eid)
+            self._entity_count = len(self._mirrored_entities)
+            self._notify_update()
+
+    async def _clear_mirrored_entities(self) -> None:
+        for eid in list(self._mirrored_entities):
+            try:
+                self.hass.states.async_remove(eid)
+            except Exception:
+                pass
+        self._mirrored_entities.clear()
+        self._entity_count = 0
 
     @callback
     def _notify_update(self) -> None:
-        """Notify listeners (sensors) that connection state changed."""
         async_dispatcher_send(
             self.hass,
             f"{SIGNAL_CONNECTION_UPDATE}_{self.entry.entry_id}",
         )
 
     def get_status_data(self) -> dict[str, Any]:
-        """Return a dict of status attributes for sensors."""
         return {
             ATTR_CONNECTED: self._connected,
             ATTR_LAST_SEEN: self._last_seen.isoformat() if self._last_seen else None,
