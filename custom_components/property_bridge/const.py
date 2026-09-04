@@ -46,6 +46,31 @@ DEFAULT_MAINTENANCE_ENABLED: Final = False
 DEFAULT_MAINTENANCE_REQUIRE_CONSENT: Final = True
 DEFAULT_MAINTENANCE_WINDOW_HOURS: Final = 12
 
+# Domains we never mirror (noise / local-only / security)
+DEFAULT_EXCLUDE_DOMAINS: Final = frozenset(
+    {
+        "persistent_notification",
+        "zone",
+        "person",
+        "device_tracker",
+        "sun",
+        "weather",
+        "conversation",
+        "assist_pipeline",
+        "stt",
+        "tts",
+        "wake_word",
+        "notify",
+        "tts",
+        "update",
+        "button",  # can be enabled later if needed
+    }
+)
+
+# Reconnect backoff
+RECONNECT_MIN_DELAY: Final = 5
+RECONNECT_MAX_DELAY: Final = 60
+
 # Platforms
 PLATFORMS: Final = ["sensor", "binary_sensor"]
 
