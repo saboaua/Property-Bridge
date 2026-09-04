@@ -209,18 +209,6 @@ Connection Status also exposes attributes such as `ws_url`, `last_error`, `host`
 
 ---
 
-## Brand assets
-
-Logos and icons live in [`brand/`](brand/):
-
-- `brand/icon.png` — integration icon
-- `brand/logo.png` — square logo
-- `brand/logo@2x.png` — wide banner
-
-To show the icon inside Home Assistant, submit them to [home-assistant/brands](https://github.com/home-assistant/brands) under `custom_integrations/property_bridge/`.
-
----
-
 ## Development
 
 ```bash
