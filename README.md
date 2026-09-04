@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/logo.png" alt="Property Bridge" width="180">
+  <img src="brand/logo.png" alt="Property Bridge" width="180"> 
 </p>
 
 <h1 align="center">Property Bridge</h1>
