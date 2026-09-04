@@ -14,6 +14,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
@@ -60,15 +61,18 @@ from .helpers import async_ensure_area, async_ensure_label
 
 _LOGGER = logging.getLogger(__name__)
 
+_CLOUD_SUFFIXES = (
+    ".ui.nabu.casa",
+    ".nabu.casa",
+    ".duckdns.org",
+    ".homeassistant.io",
+)
+
 
 class BridgeConnection:
-    """Manages a WebSocket connection to a single remote Home Assistant instance.
-
-    Also owns property-level metadata: area, label, maintenance window state.
-    """
+    """Manages a WebSocket connection to a single remote Home Assistant instance."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the connection object."""
         self.hass = hass
         self.entry = entry
         self._connected = False
@@ -95,12 +99,15 @@ class BridgeConnection:
             entry.data.get(CONF_FRIENDLY_NAME_PREFIX, "") or ""
         )
 
+        # Fix cloud hosts saved with port 8123 (need 443)
+        self.host, self.secure, self.port = self._normalize_endpoint(
+            self.host, self.secure, self.port
+        )
+
         options = {**entry.data, **entry.options}
         include = options.get(CONF_INCLUDE_DOMAINS)
         exclude = options.get(CONF_EXCLUDE_DOMAINS)
-        self._include_domains: set[str] | None = (
-            set(include) if include else None
-        )
+        self._include_domains: set[str] | None = set(include) if include else None
         self._exclude_domains: set[str] = (
             set(exclude) if exclude else set(DEFAULT_EXCLUDE_DOMAINS)
         )
@@ -149,6 +156,29 @@ class BridgeConnection:
             return False
         return self.maintenance_allowed_until > dt_util.utcnow()
 
+    @staticmethod
+    def _normalize_endpoint(
+        host: str, secure: bool, port: int | None
+    ) -> tuple[str, bool, int]:
+        host = (host or "").strip()
+        if host.startswith(("http://", "https://")):
+            parsed = urlparse(host)
+            host = parsed.hostname or host
+            if parsed.scheme == "https":
+                secure = True
+            elif parsed.scheme == "http":
+                secure = False
+            if parsed.port:
+                port = parsed.port
+        host = host.split("/")[0].split("?")[0].rstrip("/")
+        if any(host.lower().endswith(s) for s in _CLOUD_SUFFIXES):
+            secure = True
+            if port in (None, 8123, DEFAULT_PORT):
+                port = 443
+        if port is None:
+            port = 443 if secure else DEFAULT_PORT
+        return host, secure, int(port)
+
     async def async_connect(self) -> None:
         _LOGGER.debug(
             "Connecting to remote HA at %s:%s (property: %s)",
@@ -156,14 +186,11 @@ class BridgeConnection:
         )
 
         options = {**self.entry.data, **self.entry.options}
-        create_area = options.get(CONF_CREATE_AREA, DEFAULT_CREATE_AREA)
-        create_label = options.get(CONF_CREATE_LABEL, DEFAULT_CREATE_LABEL)
-
-        if create_area:
+        if options.get(CONF_CREATE_AREA, DEFAULT_CREATE_AREA):
             self.area_id = await async_ensure_area(
                 self.hass, self.property_name, self.area_id
             )
-        if create_label:
+        if options.get(CONF_CREATE_LABEL, DEFAULT_CREATE_LABEL):
             self.label_id = await async_ensure_label(
                 self.hass, self.property_name, self.label_id
             )
@@ -183,32 +210,26 @@ class BridgeConnection:
             self._connection_loop(),
             name=f"property_bridge_{self.property_name}",
         )
-
         self.entry.async_on_unload(
             self.hass.bus.async_listen_once(
                 EVENT_HOMEASSISTANT_STOP, self._on_hass_stop
             )
         )
-
         _LOGGER.info(
-            "Property Bridge starting connection to '%s' (%s:%s) area=%s label=%s",
-            self.property_name, self.host, self.port, self.area_id, self.label_id,
+            "Property Bridge starting connection to '%s' (%s:%s secure=%s)",
+            self.property_name, self.host, self.port, self.secure,
         )
 
     async def async_disconnect(self) -> None:
-        _LOGGER.debug("Disconnecting from '%s'", self.property_name)
         self._stop = True
-
         if self._ws and not self._ws.closed:
             await self._ws.close()
-
         if self._ws_task and not self._ws_task.done():
             self._ws_task.cancel()
             try:
                 await self._ws_task
             except asyncio.CancelledError:
                 pass
-
         await self._clear_mirrored_entities()
         self._connected = False
         self._entity_count = 0
@@ -239,14 +260,11 @@ class BridgeConnection:
                     self._connected = False
                     self._notify_update()
                     await self._clear_mirrored_entities()
-
                 if self._stop:
                     break
-
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, RECONNECT_MAX_DELAY)
         except asyncio.CancelledError:
-            _LOGGER.debug("Connection loop for '%s' cancelled", self.property_name)
             raise
         finally:
             await self._clear_mirrored_entities()
@@ -254,12 +272,28 @@ class BridgeConnection:
             self._notify_update()
 
     async def _run_session(self) -> None:
+        # Persist corrected cloud endpoint into the config entry
+        data = dict(self.entry.data)
+        if (
+            data.get(CONF_HOST) != self.host
+            or data.get(CONF_PORT) != self.port
+            or data.get(CONF_SECURE) != self.secure
+        ):
+            data[CONF_HOST] = self.host
+            data[CONF_PORT] = self.port
+            data[CONF_SECURE] = self.secure
+            self.hass.config_entries.async_update_entry(self.entry, data=data)
+            _LOGGER.info(
+                "Updated entry endpoint for '%s' → %s:%s secure=%s",
+                self.property_name, self.host, self.port, self.secure,
+            )
+
         session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
         url = self._ws_url()
         _LOGGER.info("Opening WebSocket to %s for property '%s'", url, self.property_name)
 
         async with session.ws_connect(
-            url, heartbeat=30, timeout=aiohttp.ClientTimeout(total=30),
+            url, heartbeat=30, timeout=aiohttp.ClientTimeout(total=30)
         ) as ws:
             self._ws = ws
             self._msg_id = 1
@@ -275,11 +309,9 @@ class BridgeConnection:
                 raise RuntimeError(f"Auth failed: {msg.get('message', msg)}")
 
             self._remote_version = msg.get("ha_version", "unknown")
-            self._connected = True
             self._last_seen = dt_util.utcnow()
-            self._notify_update()
             _LOGGER.info(
-                "Authenticated to '%s' (HA %s)",
+                "Authenticated to '%s' (HA %s) – fetching states…",
                 self.property_name, self._remote_version,
             )
 
@@ -288,13 +320,21 @@ class BridgeConnection:
                 for state in states:
                     self._apply_remote_state(state)
                 self._entity_count = len(self._mirrored_entities)
-                self._notify_update()
                 _LOGGER.info(
-                    "Mirrored %s entities from '%s'",
-                    self._entity_count, self.property_name,
+                    "Mirrored %s / %s entities from '%s'",
+                    self._entity_count, len(states), self.property_name,
+                )
+            else:
+                _LOGGER.warning(
+                    "get_states unexpected payload for '%s': %s",
+                    self.property_name, type(states),
                 )
 
+            self._connected = True
+            self._notify_update()
+
             await self._send_command(ws, "subscribe_events", event_type="state_changed")
+            _LOGGER.info("Subscribed to state_changed for '%s'", self.property_name)
 
             async for raw in ws:
                 if self._stop:
@@ -307,10 +347,8 @@ class BridgeConnection:
                     data = raw.json()
                 except Exception:
                     continue
-
                 self._last_seen = dt_util.utcnow()
                 await self._handle_message(data)
-
                 if (
                     self.maintenance_allowed_until
                     and self.maintenance_allowed_until <= dt_util.utcnow()
@@ -325,10 +363,9 @@ class BridgeConnection:
     ) -> Any:
         msg_id = self._msg_id
         self._msg_id += 1
-        payload = {"id": msg_id, "type": cmd_type, **kwargs}
         fut: asyncio.Future = self.hass.loop.create_future()
         self._pending[msg_id] = fut
-        await ws.send_json(payload)
+        await ws.send_json({"id": msg_id, "type": cmd_type, **kwargs})
         try:
             return await asyncio.wait_for(fut, timeout=30)
         finally:
@@ -336,10 +373,8 @@ class BridgeConnection:
 
     async def _handle_message(self, data: dict[str, Any]) -> None:
         msg_type = data.get("type")
-
         if msg_type == "result":
-            msg_id = data.get("id")
-            fut = self._pending.get(msg_id)
+            fut = self._pending.get(data.get("id"))
             if fut and not fut.done():
                 if data.get("success"):
                     fut.set_result(data.get("result"))
@@ -348,7 +383,6 @@ class BridgeConnection:
                         RuntimeError(str(data.get("error", "unknown error")))
                     )
             return
-
         if msg_type == "event":
             event = data.get("event") or {}
             if event.get("event_type") == "state_changed":
@@ -359,17 +393,15 @@ class BridgeConnection:
                     self._remove_local_entity(entity_id)
                 elif new_state:
                     self._apply_remote_state(new_state)
-            return
+                    self._entity_count = len(self._mirrored_entities)
 
     def _should_mirror(self, entity_id: str) -> bool:
         if not entity_id or "." not in entity_id:
             return False
         domain = entity_id.split(".", 1)[0]
-        if domain in self._exclude_domains:
+        if domain in self._exclude_domains or domain == DOMAIN:
             return False
         if self._include_domains is not None and domain not in self._include_domains:
-            return False
-        if domain == DOMAIN:
             return False
         return True
 
@@ -383,17 +415,13 @@ class BridgeConnection:
         remote_eid = state.get("entity_id")
         if not remote_eid or not self._should_mirror(remote_eid):
             return
-
         local_eid = self._local_entity_id(remote_eid)
         attrs = dict(state.get("attributes") or {})
-
         if self.friendly_name_prefix:
             original = attrs.get("friendly_name") or remote_eid
             attrs["friendly_name"] = f"{self.friendly_name_prefix}{original}"
-
         attrs["property_bridge_remote"] = self.property_name
         attrs["property_bridge_remote_entity_id"] = remote_eid
-
         try:
             self.hass.states.async_set(local_eid, state.get("state"), attrs)
             self._mirrored_entities.add(local_eid)
@@ -421,8 +449,7 @@ class BridgeConnection:
     @callback
     def _notify_update(self) -> None:
         async_dispatcher_send(
-            self.hass,
-            f"{SIGNAL_CONNECTION_UPDATE}_{self.entry.entry_id}",
+            self.hass, f"{SIGNAL_CONNECTION_UPDATE}_{self.entry.entry_id}"
         )
 
     def get_status_data(self) -> dict[str, Any]:
