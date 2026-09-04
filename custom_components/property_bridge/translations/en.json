@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "Add Remote Property",
-        "description": "Connect a remote Home Assistant instance (one rental property) to this central Property Bridge portal.\n\nYou can use a local IP, Tailscale hostname, or a Nabu Casa link (e.g. abcd1234.ui.nabu.casa).",
+        "description": "Connect a remote Home Assistant instance (one rental property) to this central Property Bridge portal.\n\nYou can use a local IP, Tailscale hostname, Nabu Casa (e.g. abcd1234.ui.nabu.casa), or DuckDNS (e.g. myhouse.duckdns.org).",
         "data": {
           "property_name": "Property name",
-          "host": "Host / IP / Tailscale / Nabu Casa link",
-          "port": "Port (leave 8123 for local, 443 is used automatically for Nabu Casa)",
+          "host": "Host / IP / Tailscale / Nabu Casa / DuckDNS",
+          "port": "Port (leave 8123 for local; 443 is used automatically for Nabu Casa & DuckDNS)",
           "access_token": "Long-lived access token",
           "secure": "Use HTTPS / WSS (secure)",
           "verify_ssl": "Verify SSL certificate",
@@ -19,7 +19,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect to the remote Home Assistant. Check host, port, token and network. For Nabu Casa use the hostname only (e.g. abcd1234.ui.nabu.casa) and leave Secure ON.",
+      "cannot_connect": "Unable to connect to the remote Home Assistant. Check host, port, token and network. For Nabu Casa / DuckDNS use the hostname only (e.g. abcd1234.ui.nabu.casa or myhouse.duckdns.org) and leave Secure ON.",
       "invalid_ssl": "SSL certificate problem. Try turning off 'Verify SSL certificate' for self-signed certificates, or make sure you are using the correct HTTPS URL.",
       "unknown": "Unexpected error occurred."
     },

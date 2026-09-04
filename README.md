@@ -4,10 +4,11 @@
 
 One central portal for every property. View and control smart devices, build automations, and monitor connection health across your entire portfolio — perfect for Airbnb hosts, vacation rental managers, and multi-home owners.
 
-## Features (v0.2.0)
+## Features (v0.2.1)
 
 - Add any number of remote Home Assistant instances via a clean UI config flow
-- Secure connection using long-lived access tokens (works great over Tailscale / WireGuard)
+- Secure connection using long-lived access tokens (works great over Tailscale / WireGuard / Nabu Casa / DuckDNS)
+- **Smart host detection** – Nabu Casa (`.ui.nabu.casa`) and DuckDNS (`.duckdns.org`) automatically use HTTPS on port 443
 - Connection health sensors per property (status, entity count, last seen)
 - Entity ID and friendly-name prefixes so devices from different properties never collide
 - **Automatic Area & Label** creation per property
@@ -39,9 +40,9 @@ Copy the `custom_components/property_bridge` folder into your Home Assistant `cu
 2. In the central Home Assistant, add the **Property Bridge** integration.
 3. Fill in:
    - **Property name** (e.g. `Aruba Ocean View`)
-   - **Host** (IP, hostname, or Tailscale name)
-   - **Port** (default 8123)
-   - **Access token**
+   - **Host** – local IP, Tailscale name, Nabu Casa link (`xxxx.ui.nabu.casa`), or DuckDNS hostname (`myhouse.duckdns.org`). Full URLs are also accepted and cleaned automatically.
+   - **Port** – leave 8123 for local/Tailscale; Nabu Casa and DuckDNS automatically switch to 443
+   - **Access token** (long-lived token from the *remote* Home Assistant)
    - Optional entity / friendly-name prefixes
    - Toggle automatic Area / Label creation
 
@@ -98,32 +99,3 @@ automation:
 - Install [Tailscale](https://tailscale.com/) (or Headscale) on every Home Assistant instance.
 - Use the Tailscale hostname as the `host` value — works behind CGNAT, no open ports required.
 - Apply ACLs so only the central management instance (and authorized users) can reach the property instances.
-
-## Roadmap
-
-- [x] HACS-compatible structure & config flow
-- [x] Connection status sensors
-- [x] Automatic area / label assignment per property
-- [x] Rental calendar helpers (check-in / check-out presets)
-- [x] Maintenance windows / consent (multi-tenant foundation)
-- [ ] Full WebSocket state mirroring + service call forwarding
-- [ ] Include / exclude domain & entity filters
-- [ ] Bulk health dashboard
-- [ ] Deeper calendar integration (auto entry_id lookup)
-
-## Development
-
-```bash
-git clone https://github.com/saboaua/Property-Bridge.git
-```
-
-Use `pytest-homeassistant-custom-component` for tests.
-
-## Credits & Inspiration
-
-Inspired by the community component [remote_homeassistant](https://github.com/custom-components/remote_homeassistant).  
-Built for people managing smart vacation rentals and multi-property portfolios with Home Assistant.
-
-## License
-
-MIT License – see [LICENSE](LICENSE)
