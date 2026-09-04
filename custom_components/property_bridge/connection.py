@@ -61,13 +61,6 @@ from .helpers import async_ensure_area, async_ensure_label
 
 _LOGGER = logging.getLogger(__name__)
 
-_CLOUD_SUFFIXES = (
-    ".ui.nabu.casa",
-    ".nabu.casa",
-    ".duckdns.org",
-    ".homeassistant.io",
-)
-
 
 class BridgeConnection:
     """Manages a WebSocket connection to a single remote Home Assistant instance."""
@@ -100,7 +93,6 @@ class BridgeConnection:
             entry.data.get(CONF_FRIENDLY_NAME_PREFIX, "") or ""
         )
 
-        # In-memory only normalization (never write back during WS session)
         self.host, self.secure, self.port = self._normalize_endpoint(
             self.host, self.secure, self.port
         )
@@ -187,11 +179,6 @@ class BridgeConnection:
         return host, secure, int(port)
 
     async def async_connect(self) -> None:
-        _LOGGER.debug(
-            "Connecting to remote HA at %s:%s (property: %s)",
-            self.host, self.port, self.property_name,
-        )
-
         options = {**self.entry.data, **self.entry.options}
         if options.get(CONF_CREATE_AREA, DEFAULT_CREATE_AREA):
             self.area_id = await async_ensure_area(
@@ -245,13 +232,11 @@ class BridgeConnection:
         self._connected = False
         self._entity_count = 0
         self._notify_update()
-        _LOGGER.info("Property Bridge disconnected from '%s'", self.property_name)
 
     async def _on_hass_stop(self, _event) -> None:
         await self.async_disconnect()
 
     def _ws_url(self) -> str:
-        """Build WebSocket URL (omit standard ports for better proxy compatibility)."""
         scheme = "wss" if self.secure else "ws"
         if self.secure and self.port == 443:
             return f"{scheme}://{self.host}/api/websocket"
@@ -290,24 +275,48 @@ class BridgeConnection:
             self._notify_update()
 
     async def _run_session(self) -> None:
-        # Do NOT call async_update_entry here — it triggers a reload loop.
-        session = async_get_clientsession(self.hass)
+        session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
         url = self._ws_url()
-        if not self.secure:
-            ssl_param = None
-        elif self.verify_ssl:
-            ssl_param = True
-        else:
-            ssl_param = False
 
-        _LOGGER.info(
-            "Opening WebSocket to %s for property '%s' (ssl=%s)",
-            url, self.property_name, ssl_param,
+        # REST preflight – surfaces token / network problems clearly
+        rest_url = (
+            url.replace("wss://", "https://")
+            .replace("ws://", "http://")
+            .replace("/api/websocket", "/api/")
         )
+        try:
+            async with session.get(
+                rest_url,
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status in (401, 403):
+                    raise RuntimeError(
+                        f"Token rejected by remote HA (HTTP {resp.status}). "
+                        "Create a new long-lived access token on the remote instance."
+                    )
+                if resp.status >= 400:
+                    raise RuntimeError(
+                        f"Remote HA REST check failed: HTTP {resp.status} at {rest_url}"
+                    )
+                _LOGGER.info(
+                    "REST preflight OK for '%s' (%s → HTTP %s)",
+                    self.property_name, rest_url, resp.status,
+                )
+        except RuntimeError:
+            raise
+        except Exception as err:
+            raise RuntimeError(
+                f"REST preflight failed for {rest_url}: {type(err).__name__}: {err}"
+            ) from err
 
-        async with session.ws_connect(
-            url, heartbeat=30, ssl=ssl_param, timeout=aiohttp.ClientTimeout(total=30)
-        ) as ws:
+        _LOGGER.info("Opening WebSocket to %s for property '%s'", url, self.property_name)
+
+        ws_kwargs: dict[str, Any] = {"heartbeat": 30, "timeout": 30.0}
+        if self.secure and not self.verify_ssl:
+            ws_kwargs["ssl"] = False
+
+        async with session.ws_connect(url, **ws_kwargs) as ws:
             self._ws = ws
             self._msg_id = 1
             self._pending.clear()
