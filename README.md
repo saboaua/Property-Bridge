@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/HACS-Custom-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white" alt="HACS">
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.12%2B-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white" alt="Home Assistant">
   <img src="https://img.shields.io/badge/version-0.4.0-blue?style=for-the-badge" alt="Version">
+  <a href="https://ko-fi.com/patrickgfortin"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Buy Me a Coffee"></a>
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
 </p>
 
@@ -40,6 +41,14 @@ One central portal for every property. View and control smart devices, run autom
 | **Portfolio health** | `get_portfolio_status` service + Lovelace example dashboard |
 | **Calendar targeting** | Check-in/out by calendar entity or property name (no entry_id required) |
 | **Health sensors** | Connection status, mirrored entity count, last seen, maintenance state |
+
+---
+
+## Support the Project
+
+If you find Portfolio Tracker helpful and want to support its continued development, feel free to buy me a coffee!
+
+<a href="https://ko-fi.com/patrickgfortin" target="_blank"><img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" height="36" alt="Buy Me a Coffee at ko-fi.com" /></a>
 
 ---
 
