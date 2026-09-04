@@ -17,6 +17,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, PLATFORMS
 from .connection import BridgeConnection
+from .services import async_setup_services, async_unload_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,14 +45,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = connection
 
+    # Register services once (idempotent)
+    await async_setup_services(hass)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     _LOGGER.info(
-        "Property Bridge: connected to property '%s' at %s",
+        "Property Bridge: connected to property '%s' at %s (area=%s, label=%s)",
         entry.data.get("property_name", entry.title),
         entry.data.get("host"),
+        connection.area_id,
+        connection.label_id,
     )
     return True
 
@@ -66,6 +72,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         if connection:
             await connection.async_disconnect()
+
+        # Remove services only when no entries remain
+        if not hass.data[DOMAIN]:
+            await async_unload_services(hass)
 
     return unload_ok
 
