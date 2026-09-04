@@ -1,15 +1,15 @@
 {
   "domain": "property_bridge",
   "name": "Property Bridge",
-  "version": "0.4.0",
-  "config_flow": true,
-  "documentation": "https://github.com/saboaua/Property-Bridge",
-  "issue_tracker": "https://github.com/saboaua/Property-Bridge/issues",
-  "codeowners": ["@saboaua"],
-  "iot_class": "local_push",
-  "requirements": [],
-  "dependencies": ["http"],
   "after_dependencies": [],
+  "codeowners": ["@saboaua"],
+  "config_flow": true,
+  "dependencies": ["http"],
+  "documentation": "https://github.com/saboaua/Property-Bridge",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/saboaua/Property-Bridge/issues",
   "loggers": ["custom_components.property_bridge"],
-  "integration_type": "hub"
+  "requirements": [],
+  "version": "0.4.0"
 }
