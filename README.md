@@ -4,11 +4,12 @@
 
 One central portal for every property. View and control smart devices, build automations, and monitor connection health across your entire portfolio — perfect for Airbnb hosts, vacation rental managers, and multi-home owners.
 
-## Features (v0.2.1)
+## Features (v0.2.2)
 
 - Add any number of remote Home Assistant instances via a clean UI config flow
 - Secure connection using long-lived access tokens (works great over Tailscale / WireGuard / Nabu Casa / DuckDNS)
 - **Smart host detection** – Nabu Casa (`.ui.nabu.casa`) and DuckDNS (`.duckdns.org`) automatically use HTTPS on port 443
+- **Live WebSocket entity mirroring** – remote states appear on the central instance and stay in sync
 - Connection health sensors per property (status, entity count, last seen)
 - Entity ID and friendly-name prefixes so devices from different properties never collide
 - **Automatic Area & Label** creation per property
@@ -16,7 +17,7 @@ One central portal for every property. View and control smart devices, build aut
 - **Maintenance windows & consent** – time-boxed access with optional consent gate (multi-tenant ready)
 - Designed from day one for property managers and rental operators
 
-> **Current status**: Solid feature skeleton. WebSocket state mirroring and service-call forwarding is still stubbed; area/label, presets and maintenance services are fully implemented and ready to use.
+> **Current status**: WebSocket entity mirroring is live (`get_states` + `state_changed`). Service-call forwarding back to the remote instance is the next planned feature.
 
 ## Installation (HACS)
 
@@ -89,7 +90,7 @@ automation:
 ## Sensors & binary sensors (per property)
 
 - **Connection Status** – Connected / Disconnected  
-- **Mirrored Entities** – count of remote entities (once mirroring is live)  
+- **Mirrored Entities** – count of remote entities (live)  
 - **Maintenance Until** – ISO timestamp when the current window ends  
 - **Maintenance Allowed** (binary) – on while a valid window is open  
 - **Maintenance Consent** (binary) – on when consent has been granted  
