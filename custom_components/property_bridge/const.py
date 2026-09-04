@@ -15,8 +15,6 @@ CONF_ENTITY_PREFIX: Final = "entity_prefix"
 CONF_FRIENDLY_NAME_PREFIX: Final = "friendly_name_prefix"
 CONF_INCLUDE_DOMAINS: Final = "include_domains"
 CONF_EXCLUDE_DOMAINS: Final = "exclude_domains"
-CONF_INCLUDE_ENTITIES: Final = "include_entities"
-CONF_EXCLUDE_ENTITIES: Final = "exclude_entities"
 
 # Configuration keys – area / labels
 CONF_CREATE_AREA: Final = "create_area"
@@ -30,7 +28,6 @@ CONF_CHECKOUT_SCRIPT: Final = "checkout_script"
 CONF_CHECKIN_SCENE: Final = "checkin_scene"
 CONF_CHECKOUT_SCENE: Final = "checkout_scene"
 CONF_OCCUPANCY_HELPER: Final = "occupancy_helper"
-CONF_CALENDAR_ENTITY: Final = "calendar_entity"
 
 # Configuration keys – maintenance / consent
 CONF_MAINTENANCE_ENABLED: Final = "maintenance_enabled"
@@ -98,8 +95,6 @@ SERVICE_TRIGGER_AUTOMATION: Final = "trigger_automation"
 SERVICE_GET_AUTOMATION_CONFIG: Final = "get_automation_config"
 SERVICE_UPDATE_AUTOMATION_CONFIG: Final = "update_automation_config"
 SERVICE_LIST_AUTOMATIONS: Final = "list_automations"
-SERVICE_LIST_PROPERTIES: Final = "list_properties"
-SERVICE_PORTFOLIO_STATUS: Final = "get_portfolio_status"
 
 # Domains whose local service calls are forwarded to the remote instance
 PROXY_SERVICE_DOMAINS: Final = frozenset(
