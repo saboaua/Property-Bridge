@@ -4,15 +4,18 @@
 
 One central portal for every property. View and control smart devices, build automations, and monitor connection health across your entire portfolio — perfect for Airbnb hosts, vacation rental managers, and multi-home owners.
 
-## Features (v0.1)
+## Features (v0.2.0)
 
 - Add any number of remote Home Assistant instances via a clean UI config flow
 - Secure connection using long-lived access tokens (works great over Tailscale / WireGuard)
 - Connection health sensors per property (status, entity count, last seen)
 - Entity ID and friendly-name prefixes so devices from different properties never collide
+- **Automatic Area & Label** creation per property
+- **Rental calendar helpers** – check-in / check-out preset services (script + scene)
+- **Maintenance windows & consent** – time-boxed access with optional consent gate (multi-tenant ready)
 - Designed from day one for property managers and rental operators
 
-> **Current status**: This is a clean, HACS-ready **skeleton**. The WebSocket state mirroring and service-call forwarding logic is stubbed so the integration installs, configures, and creates sensors. Full remote entity sync is the next development milestone.
+> **Current status**: Solid feature skeleton. WebSocket state mirroring and service-call forwarding is still stubbed; area/label, presets and maintenance services are fully implemented and ready to use.
 
 ## Installation (HACS)
 
@@ -40,39 +43,58 @@ Copy the `custom_components/property_bridge` folder into your Home Assistant `cu
    - **Port** (default 8123)
    - **Access token**
    - Optional entity / friendly-name prefixes
+   - Toggle automatic Area / Label creation
 
-Each property appears as a device with status sensors. Once the full connection layer is implemented, all selected remote entities will appear under that property (prefixed) and can be used in automations and dashboards on the central instance.
+### Options (per property)
+
+After adding a property, open **Configure** on the integration entry:
+
+| Option | Purpose |
+|--------|---------|
+| Create Area / Label | Auto-create Home Assistant Area and Label named after the property |
+| Check-in script / scene | Entity IDs run by the `apply_checkin_preset` service |
+| Check-out script / scene | Entity IDs run by the `apply_checkout_preset` service |
+| Maintenance enabled | Turn the maintenance-window feature on |
+| Require consent | Block opening a window until `grant_maintenance_consent` is called |
+| Default window hours | Duration used when requesting a maintenance window |
+
+## Services
+
+All services require the config **entry_id** of the property (visible on the device page or under Settings → Devices & Services → Property Bridge).
+
+| Service | Description |
+|---------|-------------|
+| `property_bridge.apply_checkin_preset` | Runs the configured check-in script and/or scene |
+| `property_bridge.apply_checkout_preset` | Runs the configured check-out script and/or scene |
+| `property_bridge.grant_maintenance_consent` | Grants consent for maintenance |
+| `property_bridge.request_maintenance_window` | Opens a time-limited maintenance window |
+| `property_bridge.end_maintenance_window` | Closes the window and revokes consent |
+
+### Example automation (check-in from calendar)
+
+```yaml
+automation:
+  - alias: "Property check-in preset"
+    trigger:
+      - platform: calendar
+        event: start
+        entity_id: calendar.airbnb_aruba_ocean_view
+    action:
+      - service: property_bridge.apply_checkin_preset
+        data:
+          entry_id: "YOUR_CONFIG_ENTRY_ID"
+```
+
+## Sensors & binary sensors (per property)
+
+- **Connection Status** – Connected / Disconnected  
+- **Mirrored Entities** – count of remote entities (once mirroring is live)  
+- **Maintenance Until** – ISO timestamp when the current window ends  
+- **Maintenance Allowed** (binary) – on while a valid window is open  
+- **Maintenance Consent** (binary) – on when consent has been granted  
 
 ## Recommended Network Setup
 
 - Install [Tailscale](https://tailscale.com/) (or Headscale) on every Home Assistant instance.
 - Use the Tailscale hostname as the `host` value — works behind CGNAT, no open ports required.
 - Apply ACLs so only the central management instance (and authorized users) can reach the property instances.
-
-## Roadmap
-
-- [x] HACS-compatible structure & config flow
-- [x] Connection status sensors
-- [ ] Full WebSocket state mirroring + service call forwarding
-- [ ] Include / exclude domain & entity filters
-- [ ] Automatic area / label assignment per property
-- [ ] Bulk health dashboard
-- [ ] Rental calendar helpers (check-in / check-out presets)
-- [ ] Options for maintenance windows / consent (future multi-tenant features)
-
-## Development
-
-```bash
-git clone https://github.com/saboaua/Property-Bridge.git
-```
-
-Use `pytest-homeassistant-custom-component` for tests.
-
-## Credits & Inspiration
-
-Inspired by the community component [remote_homeassistant](https://github.com/custom-components/remote_homeassistant).  
-Built for people managing smart vacation rentals and multi-property portfolios with Home Assistant.
-
-## License
-
-MIT License – see [LICENSE](LICENSE)
