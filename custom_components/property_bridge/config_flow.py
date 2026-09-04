@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
+from urllib.parse import urlparse
 
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -41,47 +44,114 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_PROPERTY_NAME): str,
-        vol.Required(CONF_HOST): str,
-        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
-        vol.Required(CONF_ACCESS_TOKEN): str,
-        vol.Optional(CONF_SECURE, default=DEFAULT_SECURE): bool,
-        vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
-        vol.Optional(CONF_ENTITY_PREFIX, default=""): str,
-        vol.Optional(CONF_FRIENDLY_NAME_PREFIX, default=""): str,
-        vol.Optional(CONF_CREATE_AREA, default=DEFAULT_CREATE_AREA): bool,
-        vol.Optional(CONF_CREATE_LABEL, default=DEFAULT_CREATE_LABEL): bool,
-    }
+# Common cloud / remote access domains that always use HTTPS on 443
+_CLOUD_HOST_SUFFIXES = (
+    ".ui.nabu.casa",
+    ".nabu.casa",
+    ".duckdns.org",
+    ".homeassistant.io",
 )
+
+
+def _normalize_host_input(raw_host: str, secure: bool, port: int | None) -> tuple[str, bool, int]:
+    """Normalize host / URL input into (hostname, secure, port).
+
+    Accepts plain hostnames, IPs, Tailscale names, or full URLs such as:
+      https://abcd1234.ui.nabu.casa
+      http://192.168.1.50:8123
+    """
+    host = (raw_host or "").strip()
+
+    # User pasted a full URL
+    if host.startswith(("http://", "https://")):
+        parsed = urlparse(host)
+        host = parsed.hostname or host
+        if parsed.scheme == "https":
+            secure = True
+        elif parsed.scheme == "http":
+            secure = False
+        if parsed.port:
+            port = parsed.port
+
+    # Strip any leftover path / trailing slash
+    host = host.split("/")[0].split("?")[0].rstrip("/")
+
+    # Auto-detect common cloud hosts → force HTTPS + 443
+    host_lower = host.lower()
+    if any(host_lower.endswith(suffix) for suffix in _CLOUD_HOST_SUFFIXES):
+        secure = True
+        if port is None or port in (8123, DEFAULT_PORT):
+            port = 443
+
+    # Sensible port defaults
+    if port is None:
+        port = 443 if secure else DEFAULT_PORT
+
+    return host, secure, port
 
 
 async def validate_connection(
     hass: HomeAssistant, data: dict[str, Any]
 ) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
+    """Validate the user input allows us to connect to the remote Home Assistant."""
     session = async_get_clientsession(hass)
-    scheme = "https" if data.get(CONF_SECURE, True) else "http"
-    url = f"{scheme}://{data[CONF_HOST]}:{data.get(CONF_PORT, DEFAULT_PORT)}/api/"
+
+    raw_host = data[CONF_HOST]
+    secure = data.get(CONF_SECURE, DEFAULT_SECURE)
+    port = data.get(CONF_PORT)
+    verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+    token = data[CONF_ACCESS_TOKEN]
+
+    host, secure, port = _normalize_host_input(raw_host, secure, port)
+
+    # Persist the cleaned values back so the entry stores them correctly
+    data[CONF_HOST] = host
+    data[CONF_SECURE] = secure
+    data[CONF_PORT] = port
+
+    scheme = "https" if secure else "http"
+    url = f"{scheme}://{host}:{port}/api/"
 
     headers = {
-        "Authorization": f"Bearer {data[CONF_ACCESS_TOKEN]}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+
+    _LOGGER.debug(
+        "Validating connection to %s (secure=%s, verify_ssl=%s)",
+        url,
+        secure,
+        verify_ssl,
+    )
 
     try:
         async with session.get(
             url,
             headers=headers,
-            ssl=data.get(CONF_VERIFY_SSL, True),
-            timeout=10,
+            ssl=verify_ssl,
+            timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
+            # 200 = success, 401/403 = host reachable but token wrong/expired
             if resp.status in (200, 401, 403):
+                if resp.status in (401, 403):
+                    _LOGGER.warning(
+                        "Remote HA at %s reachable but returned %s – check the long-lived access token",
+                        url,
+                        resp.status,
+                    )
                 return {"title": data[CONF_PROPERTY_NAME]}
             resp.raise_for_status()
-    except Exception as err:
-        _LOGGER.debug("Connection validation failed: %s", err)
+    except aiohttp.ClientConnectorCertificateError as err:
+        _LOGGER.debug("SSL certificate error connecting to %s: %s", url, err)
+        raise InvalidSSL from err
+    except aiohttp.ClientConnectorError as err:
+        _LOGGER.debug("Connection error to %s: %s", url, err)
+        raise CannotConnect from err
+    except TimeoutError as err:
+        _LOGGER.debug("Timeout connecting to %s: %s", url, err)
+        raise CannotConnect from err
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.debug("Unexpected error validating %s: %s", url, err)
         raise CannotConnect from err
 
     return {"title": data[CONF_PROPERTY_NAME]}
@@ -89,6 +159,10 @@ async def validate_connection(
 
 class CannotConnect(Exception):
     """Error to indicate we cannot connect."""
+
+
+class InvalidSSL(Exception):
+    """Error to indicate an SSL / certificate problem."""
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -103,12 +177,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            unique_id = f"{user_input[CONF_PROPERTY_NAME]}_{user_input[CONF_HOST]}"
+            # Clean / normalize before uniqueness check
+            host, secure, port = _normalize_host_input(
+                user_input[CONF_HOST],
+                user_input.get(CONF_SECURE, DEFAULT_SECURE),
+                user_input.get(CONF_PORT),
+            )
+            user_input[CONF_HOST] = host
+            user_input[CONF_SECURE] = secure
+            user_input[CONF_PORT] = port
+
+            unique_id = f"{user_input[CONF_PROPERTY_NAME]}_{host}"
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
             try:
                 info = await validate_connection(self.hass, user_input)
+            except InvalidSSL:
+                errors["base"] = "invalid_ssl"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
@@ -130,6 +216,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
         return OptionsFlowHandler(config_entry)
+
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_PROPERTY_NAME): str,
+        vol.Required(CONF_HOST): str,
+        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Required(CONF_ACCESS_TOKEN): str,
+        vol.Optional(CONF_SECURE, default=DEFAULT_SECURE): bool,
+        vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
+        vol.Optional(CONF_ENTITY_PREFIX, default=""): str,
+        vol.Optional(CONF_FRIENDLY_NAME_PREFIX, default=""): str,
+        vol.Optional(CONF_CREATE_AREA, default=DEFAULT_CREATE_AREA): bool,
+        vol.Optional(CONF_CREATE_LABEL, default=DEFAULT_CREATE_LABEL): bool,
+    }
+)
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
