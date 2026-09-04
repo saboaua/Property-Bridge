@@ -64,6 +64,35 @@ DEFAULT_EXCLUDE_DOMAINS: Final = frozenset(
     }
 )
 
+# Domains whose local service calls are forwarded to the remote instance
+PROXY_SERVICE_DOMAINS: Final = frozenset(
+    {
+        "automation",
+        "script",
+        "scene",
+        "switch",
+        "light",
+        "cover",
+        "fan",
+        "lock",
+        "climate",
+        "media_player",
+        "button",
+        "input_boolean",
+        "input_button",
+        "input_number",
+        "input_select",
+        "input_text",
+        "number",
+        "select",
+        "vacuum",
+        "water_heater",
+        "humidifier",
+        "siren",
+        "alarm_control_panel",
+    }
+)
+
 # Reconnect backoff
 RECONNECT_MIN_DELAY: Final = 5
 RECONNECT_MAX_DELAY: Final = 60
@@ -90,3 +119,8 @@ SERVICE_APPLY_CHECKOUT: Final = "apply_checkout_preset"
 SERVICE_REQUEST_MAINTENANCE: Final = "request_maintenance_window"
 SERVICE_END_MAINTENANCE: Final = "end_maintenance_window"
 SERVICE_GRANT_CONSENT: Final = "grant_maintenance_consent"
+SERVICE_CALL_REMOTE: Final = "call_remote_service"
+SERVICE_TRIGGER_AUTOMATION: Final = "trigger_automation"
+SERVICE_GET_AUTOMATION_CONFIG: Final = "get_automation_config"
+SERVICE_UPDATE_AUTOMATION_CONFIG: Final = "update_automation_config"
+SERVICE_LIST_AUTOMATIONS: Final = "list_automations"
