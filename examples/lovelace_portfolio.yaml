@@ -26,6 +26,27 @@ cards:
       include:
         - integration: property_bridge
           domain: sensor
+          attributes:
+            device_class: null
+      exclude:
+        - entity_id: '*mirrored*'
+        - entity_id: '*maintenance*'
+
+  - type: glance
+    title: Mirrored entities
+    columns: 3
+    entities: []
+    # After first load, open Edit → pick each property's
+    # "Mirrored Entities" sensor, or use auto-entities (HACS) below.
+
+  # Optional: requires HACS "auto-entities"
+  # - type: custom:auto-entities
+  #   card:
+  #     type: entities
+  #     title: All Property Bridge sensors
+  #   filter:
+  #     include:
+  #       - integration: property_bridge
 
   - type: markdown
     title: Quick actions

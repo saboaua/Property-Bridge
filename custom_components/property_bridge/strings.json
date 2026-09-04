@@ -44,7 +44,12 @@
           "checkout_scene": "Check-out scene entity_id (optional)",
           "maintenance_enabled": "Enable maintenance window feature",
           "maintenance_require_consent": "Require consent before opening maintenance window",
-          "maintenance_window_hours": "Default maintenance window duration (hours)"
+          "maintenance_window_hours": "Default maintenance window duration (hours)",
+          "include_domains": "Include domains only (comma-separated, empty = all)",
+          "exclude_domains": "Exclude domains (comma-separated)",
+          "include_entities": "Include entities only (comma-separated entity_ids)",
+          "exclude_entities": "Exclude entities (comma-separated entity_ids)",
+          "calendar_entity": "Linked calendar entity_id (for auto check-in/out)"
         }
       }
     }
@@ -69,6 +74,34 @@
     "grant_maintenance_consent": {
       "name": "Grant maintenance consent",
       "description": "Grant consent so a maintenance window can be opened."
+    },
+    "call_remote_service": {
+      "name": "Call remote service",
+      "description": "Call any service on the remote Home Assistant."
+    },
+    "trigger_automation": {
+      "name": "Trigger automation",
+      "description": "Trigger a mirrored remote automation."
+    },
+    "list_automations": {
+      "name": "List automations",
+      "description": "List mirrored automations for a property."
+    },
+    "get_automation_config": {
+      "name": "Get automation config",
+      "description": "Fetch full automation config from the remote."
+    },
+    "update_automation_config": {
+      "name": "Update automation config",
+      "description": "Create or update an automation on the remote."
+    },
+    "list_properties": {
+      "name": "List properties",
+      "description": "List all Property Bridge properties with status."
+    },
+    "get_portfolio_status": {
+      "name": "Get portfolio status",
+      "description": "Bulk health summary for every property."
     }
   }
 }

@@ -38,9 +38,11 @@ from .const import (
     CONF_CREATE_LABEL,
     CONF_ENTITY_PREFIX,
     CONF_EXCLUDE_DOMAINS,
+    CONF_EXCLUDE_ENTITIES,
     CONF_FRIENDLY_NAME_PREFIX,
     CONF_HOST,
     CONF_INCLUDE_DOMAINS,
+    CONF_INCLUDE_ENTITIES,
     CONF_LABEL_ID,
     CONF_MAINTENANCE_ALLOWED_UNTIL,
     CONF_PORT,
@@ -106,16 +108,20 @@ class BridgeConnection:
             self.host, self.secure, self.port
         )
 
-        # Domain filters (options override data)
+        # Domain / entity filters (options override data; CSV strings or lists)
         options = {**entry.data, **entry.options}
-        include = options.get(CONF_INCLUDE_DOMAINS)
-        exclude = options.get(CONF_EXCLUDE_DOMAINS)
-        self._include_domains: set[str] | None = (
-            set(include) if include else None
-        )
+        include = self._parse_filter_list(options.get(CONF_INCLUDE_DOMAINS))
+        exclude = self._parse_filter_list(options.get(CONF_EXCLUDE_DOMAINS))
+        self._include_domains: set[str] | None = set(include) if include else None
         self._exclude_domains: set[str] = (
             set(exclude) if exclude else set(DEFAULT_EXCLUDE_DOMAINS)
         )
+        include_ent = self._parse_filter_list(options.get(CONF_INCLUDE_ENTITIES))
+        exclude_ent = self._parse_filter_list(options.get(CONF_EXCLUDE_ENTITIES))
+        self._include_entities: set[str] | None = (
+            set(include_ent) if include_ent else None
+        )
+        self._exclude_entities: set[str] = set(exclude_ent)
 
         # Area / label
         self.area_id: str | None = entry.options.get(CONF_AREA_ID) or entry.data.get(
@@ -592,17 +598,34 @@ class BridgeConnection:
     # Entity mirroring helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_filter_list(value: Any) -> list[str]:
+        """Parse a CSV string or list into a clean list of tokens."""
+        if value is None or value == "":
+            return []
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return [str(x).strip().lower() for x in value if str(x).strip()]
+        return [
+            part.strip().lower()
+            for part in str(value).replace("\n", ",").split(",")
+            if part.strip()
+        ]
+
     def _should_mirror(self, entity_id: str) -> bool:
         """Return True if this remote entity should be mirrored."""
         if not entity_id or "." not in entity_id:
             return False
-        domain = entity_id.split(".", 1)[0]
+        eid = entity_id.lower()
+        domain = eid.split(".", 1)[0]
+        if domain == DOMAIN:
+            return False
+        if eid in self._exclude_entities:
+            return False
+        if self._include_entities is not None and eid not in self._include_entities:
+            return False
         if domain in self._exclude_domains:
             return False
         if self._include_domains is not None and domain not in self._include_domains:
-            return False
-        # Never mirror our own integration entities if they somehow appear
-        if domain == DOMAIN:
             return False
         return True
 

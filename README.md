@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/HACS-Custom-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white" alt="HACS">
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.12%2B-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white" alt="Home Assistant">
-  <img src="https://img.shields.io/badge/version-0.3.0-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.4.0-blue?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
 </p>
 
@@ -36,6 +36,9 @@ One central portal for every property. View and control smart devices, run autom
 | **Areas & labels** | Automatic Area and Label creation per property |
 | **Rental presets** | Check-in / check-out script and scene services for guest turnover |
 | **Maintenance windows** | Time-boxed access with optional consent gate (multi-tenant ready) |
+| **Domain / entity filters** | Include/exclude domains and entity_ids in the options UI |
+| **Portfolio health** | `get_portfolio_status` service + Lovelace example dashboard |
+| **Calendar targeting** | Check-in/out by calendar entity or property name (no entry_id required) |
 | **Health sensors** | Connection status, mirrored entity count, last seen, maintenance state |
 
 ---
@@ -203,9 +206,9 @@ Connection Status also exposes attributes such as `ws_url`, `last_error`, `host`
 - [x] Live WebSocket entity mirroring
 - [x] Service-call forwarding to remote
 - [x] Automation list / trigger / get / update config
-- [ ] Include / exclude domain & entity filters in options UI
-- [ ] Bulk health dashboard card
-- [ ] Deeper calendar integration (auto entry_id lookup)
+- [x] Include / exclude domain & entity filters in options UI
+- [x] Bulk health dashboard (`get_portfolio_status` + Lovelace example)
+- [x] Calendar / property-name targeting (auto entry_id lookup)
 
 ---
 

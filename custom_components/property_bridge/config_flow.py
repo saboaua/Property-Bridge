@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_CALENDAR_ENTITY,
     CONF_CHECKIN_SCENE,
     CONF_CHECKIN_SCRIPT,
     CONF_CHECKOUT_SCENE,
@@ -24,7 +25,11 @@ from .const import (
     CONF_CREATE_AREA,
     CONF_CREATE_LABEL,
     CONF_ENTITY_PREFIX,
+    CONF_EXCLUDE_DOMAINS,
+    CONF_EXCLUDE_ENTITIES,
     CONF_FRIENDLY_NAME_PREFIX,
+    CONF_INCLUDE_DOMAINS,
+    CONF_INCLUDE_ENTITIES,
     CONF_MAINTENANCE_ENABLED,
     CONF_MAINTENANCE_REQUIRE_CONSENT,
     CONF_MAINTENANCE_WINDOW_HOURS,
@@ -252,6 +257,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         data = {**self.config_entry.data, **self.config_entry.options}
 
+        def _csv(key: str) -> str:
+            val = data.get(key, "")
+            if isinstance(val, (list, tuple)):
+                return ", ".join(str(x) for x in val)
+            return str(val or "")
+
         options_schema = vol.Schema(
             {
                 # Connection / naming
@@ -271,6 +282,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_VERIFY_SSL,
                     default=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
                 ): bool,
+                # Domain / entity filters (comma-separated)
+                vol.Optional(
+                    CONF_INCLUDE_DOMAINS,
+                    default=_csv(CONF_INCLUDE_DOMAINS),
+                ): str,
+                vol.Optional(
+                    CONF_EXCLUDE_DOMAINS,
+                    default=_csv(CONF_EXCLUDE_DOMAINS),
+                ): str,
+                vol.Optional(
+                    CONF_INCLUDE_ENTITIES,
+                    default=_csv(CONF_INCLUDE_ENTITIES),
+                ): str,
+                vol.Optional(
+                    CONF_EXCLUDE_ENTITIES,
+                    default=_csv(CONF_EXCLUDE_ENTITIES),
+                ): str,
                 # Area / label
                 vol.Optional(
                     CONF_CREATE_AREA,
@@ -280,7 +308,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_CREATE_LABEL,
                     default=data.get(CONF_CREATE_LABEL, DEFAULT_CREATE_LABEL),
                 ): bool,
-                # Rental presets
+                # Rental presets + calendar
+                vol.Optional(
+                    CONF_CALENDAR_ENTITY,
+                    default=data.get(CONF_CALENDAR_ENTITY, ""),
+                ): str,
                 vol.Optional(
                     CONF_CHECKIN_SCRIPT,
                     default=data.get(CONF_CHECKIN_SCRIPT, ""),

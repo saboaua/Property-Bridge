@@ -12,6 +12,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_CALENDAR_ENTITY,
     CONF_CHECKIN_SCENE,
     CONF_CHECKIN_SCRIPT,
     CONF_CHECKOUT_SCENE,
@@ -29,6 +30,8 @@ from .const import (
     SERVICE_GET_AUTOMATION_CONFIG,
     SERVICE_GRANT_CONSENT,
     SERVICE_LIST_AUTOMATIONS,
+    SERVICE_LIST_PROPERTIES,
+    SERVICE_PORTFOLIO_STATUS,
     SERVICE_REQUEST_MAINTENANCE,
     SERVICE_TRIGGER_AUTOMATION,
     SERVICE_UPDATE_AUTOMATION_CONFIG,
@@ -39,15 +42,20 @@ from homeassistant.helpers.service import SupportsResponse
 
 _LOGGER = logging.getLogger(__name__)
 
+# Property target: entry_id OR property_name OR calendar_entity_id
 SERVICE_PROPERTY_SCHEMA = vol.Schema(
     {
-        vol.Required("entry_id"): cv.string,
+        vol.Optional("entry_id"): cv.string,
+        vol.Optional("property_name"): cv.string,
+        vol.Optional("calendar_entity_id"): cv.entity_id,
     }
 )
 
 SERVICE_MAINTENANCE_SCHEMA = vol.Schema(
     {
-        vol.Required("entry_id"): cv.string,
+        vol.Optional("entry_id"): cv.string,
+        vol.Optional("property_name"): cv.string,
+        vol.Optional("calendar_entity_id"): cv.entity_id,
         vol.Optional("hours"): vol.Coerce(int),
     }
 )
@@ -97,10 +105,39 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             raise ValueError(f"No Property Bridge entry found for id {entry_id}")
         return conn
 
+    async def _resolve_connection(call: ServiceCall):
+        """Resolve a BridgeConnection from entry_id, property_name, or calendar."""
+        data = hass.data.get(DOMAIN, {})
+        entry_id = call.data.get("entry_id")
+        if entry_id:
+            return await _get_connection(entry_id)
+
+        property_name = (call.data.get("property_name") or "").strip().lower()
+        if property_name:
+            for conn in data.values():
+                if conn.property_name.lower() == property_name:
+                    return conn
+            raise ValueError(f"No Property Bridge property named '{property_name}'")
+
+        calendar = call.data.get("calendar_entity_id")
+        if calendar:
+            calendar = calendar.lower()
+            for conn in data.values():
+                opts = {**conn.entry.data, **conn.entry.options}
+                linked = (opts.get(CONF_CALENDAR_ENTITY) or "").strip().lower()
+                if linked and linked == calendar:
+                    return conn
+            raise ValueError(
+                f"No Property Bridge property linked to calendar '{calendar}'"
+            )
+
+        raise ValueError(
+            "Provide entry_id, property_name, or calendar_entity_id to select a property"
+        )
+
     async def handle_apply_checkin(call: ServiceCall) -> None:
         """Apply check-in preset (script and/or scene) for a property."""
-        entry_id = call.data["entry_id"]
-        conn = await _get_connection(entry_id)
+        conn = await _resolve_connection(call)
         entry = conn.entry
         options = {**entry.data, **entry.options}
 
@@ -133,8 +170,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_apply_checkout(call: ServiceCall) -> None:
         """Apply check-out preset (script and/or scene) for a property."""
-        entry_id = call.data["entry_id"]
-        conn = await _get_connection(entry_id)
+        conn = await _resolve_connection(call)
         entry = conn.entry
         options = {**entry.data, **entry.options}
 
@@ -167,8 +203,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_request_maintenance(call: ServiceCall) -> None:
         """Open a maintenance window for a property."""
-        entry_id = call.data["entry_id"]
-        conn = await _get_connection(entry_id)
+        conn = await _resolve_connection(call)
         entry = conn.entry
         options = {**entry.data, **entry.options}
 
@@ -186,17 +221,15 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 "Call grant_maintenance_consent first.",
                 conn.property_name,
             )
-            # Still allow request tracking; binary sensor stays off until consent
             conn.maintenance_requested = True
             conn._notify_update()
             return
 
-        until = dt_util.utcnow() + timedelta(hours=hours)
+        until = dt_util.utcnow() + timedelta(hours=int(hours))
         conn.maintenance_allowed_until = until
         conn.maintenance_requested = True
         conn.consent_granted = True
 
-        # Persist in options so it survives reload
         new_options = dict(entry.options)
         new_options[CONF_MAINTENANCE_ALLOWED_UNTIL] = until.isoformat()
         hass.config_entries.async_update_entry(entry, options=new_options)
@@ -211,8 +244,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_end_maintenance(call: ServiceCall) -> None:
         """Close the maintenance window."""
-        entry_id = call.data["entry_id"]
-        conn = await _get_connection(entry_id)
+        conn = await _resolve_connection(call)
         entry = conn.entry
 
         conn.maintenance_allowed_until = None
@@ -228,13 +260,67 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_grant_consent(call: ServiceCall) -> None:
         """Grant consent for maintenance (multi-tenant safety)."""
-        entry_id = call.data["entry_id"]
-        conn = await _get_connection(entry_id)
+        conn = await _resolve_connection(call)
         conn.consent_granted = True
         _LOGGER.info(
             "Maintenance consent granted for property '%s'", conn.property_name
         )
         conn._notify_update()
+
+    async def handle_list_properties(call: ServiceCall) -> dict[str, Any]:
+        """List all Property Bridge properties with basic status."""
+        properties = []
+        for entry_id, conn in hass.data.get(DOMAIN, {}).items():
+            status = conn.get_status_data()
+            opts = {**conn.entry.data, **conn.entry.options}
+            properties.append(
+                {
+                    "entry_id": entry_id,
+                    "property_name": conn.property_name,
+                    "connected": status.get("connected"),
+                    "entity_count": status.get("entity_count"),
+                    "last_seen": status.get("last_seen"),
+                    "host": status.get("host"),
+                    "calendar_entity": opts.get(CONF_CALENDAR_ENTITY) or None,
+                    "maintenance_allowed": status.get("maintenance_allowed"),
+                }
+            )
+        return {"properties": properties, "count": len(properties)}
+
+    async def handle_portfolio_status(call: ServiceCall) -> dict[str, Any]:
+        """Bulk health summary for all connected properties."""
+        properties = []
+        connected = 0
+        total_entities = 0
+        for entry_id, conn in hass.data.get(DOMAIN, {}).items():
+            status = conn.get_status_data()
+            is_connected = bool(status.get("connected"))
+            if is_connected:
+                connected += 1
+            total_entities += int(status.get("entity_count") or 0)
+            properties.append(
+                {
+                    "entry_id": entry_id,
+                    "property_name": conn.property_name,
+                    "connected": is_connected,
+                    "entity_count": status.get("entity_count"),
+                    "last_seen": status.get("last_seen"),
+                    "last_error": status.get("last_error"),
+                    "remote_version": status.get("remote_version"),
+                    "ws_url": status.get("ws_url"),
+                    "maintenance_allowed": status.get("maintenance_allowed"),
+                    "maintenance_until": status.get("maintenance_until"),
+                }
+            )
+        total = len(properties)
+        return {
+            "total_properties": total,
+            "connected": connected,
+            "disconnected": total - connected,
+            "total_mirrored_entities": total_entities,
+            "healthy": total > 0 and connected == total,
+            "properties": properties,
+        }
 
     async def handle_call_remote(call: ServiceCall) -> None:
         """Call any service on the remote Home Assistant."""
@@ -339,6 +425,20 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         schema=SERVICE_UPDATE_AUTOMATION_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LIST_PROPERTIES,
+        handle_list_properties,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PORTFOLIO_STATUS,
+        handle_portfolio_status,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.ONLY,
+    )
 
     _LOGGER.debug("Property Bridge services registered")
 
@@ -356,6 +456,8 @@ async def async_unload_services(hass: HomeAssistant) -> None:
         SERVICE_LIST_AUTOMATIONS,
         SERVICE_GET_AUTOMATION_CONFIG,
         SERVICE_UPDATE_AUTOMATION_CONFIG,
+        SERVICE_LIST_PROPERTIES,
+        SERVICE_PORTFOLIO_STATUS,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)
