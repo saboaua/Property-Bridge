@@ -1,1 +1,1 @@
-"""Tests for Property Bridge integration."""
+"""Tests for Property Bridge."""
