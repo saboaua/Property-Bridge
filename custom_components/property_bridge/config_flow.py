@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -215,7 +214,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
-        return OptionsFlowHandler(config_entry)
+        # Do not pass config_entry into __init__ — on modern HA
+        # OptionsFlow.config_entry is a read-only property set by core.
+        return OptionsFlowHandler()
 
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -235,11 +236,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for Property Bridge."""
+    """Handle options flow for Property Bridge.
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+    Uses the modern HA pattern: do not assign self.config_entry
+    (it is a read-only property provided by the OptionsFlow base class).
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
