@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Remote Property",
+        "description": "Connect a remote Home Assistant instance (one rental property) to this central Property Bridge portal.",
+        "data": {
+          "property_name": "Property name",
+          "host": "Host / IP / Tailscale hostname",
+          "port": "Port",
+          "access_token": "Long-lived access token",
+          "secure": "Use HTTPS / WSS (secure)",
+          "verify_ssl": "Verify SSL certificate",
+          "entity_prefix": "Entity ID prefix (e.g. aruba01_)",
+          "friendly_name_prefix": "Friendly name prefix (e.g. Aruba 01 )"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the remote Home Assistant. Check host, port, token and network.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This property / host combination is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Property Bridge Options",
+        "data": {
+          "entity_prefix": "Entity ID prefix",
+          "friendly_name_prefix": "Friendly name prefix",
+          "secure": "Use HTTPS / WSS",
+          "verify_ssl": "Verify SSL certificate"
+        }
+      }
+    }
+  }
+}

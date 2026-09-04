@@ -1,0 +1,6 @@
+{
+  "name": "Property Bridge",
+  "render_readme": true,
+  "homeassistant": "2024.12.0",
+  "hacs": "2.0.0"
+}
