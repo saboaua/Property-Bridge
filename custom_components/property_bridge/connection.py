@@ -189,6 +189,7 @@ class BridgeConnection:
                 self.hass, self.property_name, self.label_id
             )
 
+        # Defer options write so it does not reload platforms mid-setup
         if self.area_id or self.label_id:
             new_options = dict(self.entry.options)
             changed = False
@@ -199,9 +200,20 @@ class BridgeConnection:
                 new_options[CONF_LABEL_ID] = self.label_id
                 changed = True
             if changed:
-                self.hass.config_entries.async_update_entry(
-                    self.entry, options=new_options
-                )
+
+                async def _persist_options() -> None:
+                    await asyncio.sleep(2)
+                    try:
+                        self.hass.config_entries.async_update_entry(
+                            self.entry, options=new_options
+                        )
+                    except Exception:  # pylint: disable=broad-except
+                        _LOGGER.debug(
+                            "Could not persist area/label options for '%s'",
+                            self.property_name,
+                        )
+
+                self.hass.async_create_task(_persist_options())
 
         self._stop = False
         self._ws_task = self.hass.async_create_background_task(
@@ -278,7 +290,6 @@ class BridgeConnection:
         session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
         url = self._ws_url()
 
-        # REST preflight – surfaces token / network problems clearly
         rest_url = (
             url.replace("wss://", "https://")
             .replace("ws://", "http://")
@@ -384,13 +395,49 @@ class BridgeConnection:
     async def _send_command(
         self, ws: aiohttp.ClientWebSocketResponse, cmd_type: str, **kwargs: Any
     ) -> Any:
+        """Send a WS command and pump messages until the matching result arrives.
+
+        The result is delivered on the same socket, so we must receive while waiting.
+        """
         msg_id = self._msg_id
         self._msg_id += 1
         fut: asyncio.Future = self.hass.loop.create_future()
         self._pending[msg_id] = fut
         await ws.send_json({"id": msg_id, "type": cmd_type, **kwargs})
+
         try:
-            return await asyncio.wait_for(fut, timeout=30)
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 60.0
+            while not fut.done():
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"Timed out waiting for result of '{cmd_type}' (id={msg_id})"
+                    )
+                try:
+                    raw = await asyncio.wait_for(ws.receive(), timeout=remaining)
+                except asyncio.TimeoutError as err:
+                    raise TimeoutError(
+                        f"Timed out waiting for result of '{cmd_type}' (id={msg_id})"
+                    ) from err
+
+                if raw.type in (
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.ERROR,
+                    aiohttp.WSMsgType.CLOSE,
+                ):
+                    raise RuntimeError(
+                        f"WebSocket closed while waiting for '{cmd_type}': {raw}"
+                    )
+                if raw.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                try:
+                    data = raw.json()
+                except Exception:  # pylint: disable=broad-except
+                    continue
+                await self._handle_message(data)
+
+            return fut.result()
         finally:
             self._pending.pop(msg_id, None)
 
