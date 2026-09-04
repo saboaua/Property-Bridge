@@ -85,6 +85,7 @@ class BridgeConnection:
         self._pending: dict[int, asyncio.Future] = {}
         self._mirrored_entities: set[str] = set()
         self._stop = False
+        self._last_error: str | None = None
 
         self.property_name: str = entry.data.get(
             CONF_PROPERTY_NAME, entry.title or "Unknown Property"
@@ -173,11 +174,9 @@ class BridgeConnection:
         host = host.split("/")[0].split("?")[0].rstrip("/")
 
         host_l = host.lower()
-        # Nabu Casa always on 443
         if host_l.endswith(".ui.nabu.casa") or host_l.endswith(".nabu.casa"):
             secure = True
             port = 443
-        # DuckDNS: only remap default local port when Secure is on
         elif host_l.endswith(".duckdns.org") and secure and port in (
             None, 8123, DEFAULT_PORT
         ):
@@ -203,7 +202,6 @@ class BridgeConnection:
                 self.hass, self.property_name, self.label_id
             )
 
-        # Persist area/label ids only when newly created (options, not data)
         if self.area_id or self.label_id:
             new_options = dict(self.entry.options)
             changed = False
@@ -253,7 +251,12 @@ class BridgeConnection:
         await self.async_disconnect()
 
     def _ws_url(self) -> str:
+        """Build WebSocket URL (omit standard ports for better proxy compatibility)."""
         scheme = "wss" if self.secure else "ws"
+        if self.secure and self.port == 443:
+            return f"{scheme}://{self.host}/api/websocket"
+        if not self.secure and self.port == 80:
+            return f"{scheme}://{self.host}/api/websocket"
         return f"{scheme}://{self.host}:{self.port}/api/websocket"
 
     async def _connection_loop(self) -> None:
@@ -266,9 +269,11 @@ class BridgeConnection:
                 except asyncio.CancelledError:
                     raise
                 except Exception as err:
+                    self._last_error = f"{type(err).__name__}: {err}"
                     _LOGGER.warning(
                         "WebSocket session for '%s' ended: %s – reconnecting in %ss",
-                        self.property_name, err, delay,
+                        self.property_name, self._last_error, delay,
+                        exc_info=True,
                     )
                     self._connected = False
                     self._notify_update()
@@ -286,12 +291,22 @@ class BridgeConnection:
 
     async def _run_session(self) -> None:
         # Do NOT call async_update_entry here — it triggers a reload loop.
-        session = async_get_clientsession(self.hass, verify_ssl=self.verify_ssl)
+        session = async_get_clientsession(self.hass)
         url = self._ws_url()
-        _LOGGER.info("Opening WebSocket to %s for property '%s'", url, self.property_name)
+        if not self.secure:
+            ssl_param = None
+        elif self.verify_ssl:
+            ssl_param = True
+        else:
+            ssl_param = False
+
+        _LOGGER.info(
+            "Opening WebSocket to %s for property '%s' (ssl=%s)",
+            url, self.property_name, ssl_param,
+        )
 
         async with session.ws_connect(
-            url, heartbeat=30, timeout=aiohttp.ClientTimeout(total=30)
+            url, heartbeat=30, ssl=ssl_param, timeout=aiohttp.ClientTimeout(total=30)
         ) as ws:
             self._ws = ws
             self._msg_id = 1
@@ -329,6 +344,7 @@ class BridgeConnection:
                 )
 
             self._connected = True
+            self._last_error = None
             self._notify_update()
 
             await self._send_command(ws, "subscribe_events", event_type="state_changed")
@@ -467,6 +483,9 @@ class BridgeConnection:
             "property_name": self.property_name,
             "host": self.host,
             "port": self.port,
+            "secure": self.secure,
+            "ws_url": self._ws_url(),
+            "last_error": self._last_error,
             "consent_granted": self.consent_granted,
             "maintenance_requested": self.maintenance_requested,
         }
