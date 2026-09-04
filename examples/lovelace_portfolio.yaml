@@ -1,0 +1,50 @@
+# Property Bridge — portfolio health dashboard
+#
+# How to use:
+# 1. Create a new dashboard or view in Lovelace (raw editor).
+# 2. Paste this YAML into a view.
+# 3. Sensors auto-match entities that contain "connection_status" or "mirrored"
+#    from the property_bridge integration. Adjust entity filters if needed.
+#
+# Tip: Call service property_bridge.get_portfolio_status in Developer Tools
+#      to inspect the full JSON health payload.
+
+title: Portfolio Health
+path: portfolio
+icon: mdi:home-group
+cards:
+  - type: markdown
+    content: |
+      ## Property Bridge portfolio
+      Use **Developer Tools → Actions → `property_bridge.get_portfolio_status`**
+      for a full JSON health report (connected count, errors, entity totals).
+
+  - type: entities
+    title: Connection status
+    state_color: true
+    filter:
+      include:
+        - integration: property_bridge
+          domain: sensor
+
+  - type: markdown
+    title: Quick actions
+    content: |
+      **Check-in by calendar** (set calendar entity in property options first):
+      ```yaml
+      service: property_bridge.apply_checkin_preset
+      data:
+        calendar_entity_id: calendar.airbnb_aruba
+      ```
+
+      **Check-in by property name:**
+      ```yaml
+      service: property_bridge.apply_checkin_preset
+      data:
+        property_name: Aruba Ocean View
+      ```
+
+      **Portfolio status (response):**
+      ```yaml
+      service: property_bridge.get_portfolio_status
+      ```
