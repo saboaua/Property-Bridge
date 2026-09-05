@@ -10,10 +10,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/HACS-Custom-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white" alt="HACS">
-  <img src="https://img.shields.io/badge/Home%20Assistant-2024.12%2B-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white" alt="Home Assistant">
-  <img src="https://img.shields.io/badge/version-0.4.0-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/HACS-Custom-orange?style=flat-square" alt="HACS">
+  <img src="https://img.shields.io/badge/HA-2024.6+-41BDF5?style=flat-square" alt="Home Assistant">
   <a href="https://ko-fi.com/patrickgfortin"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Buy Me a Coffee"></a>
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
+  <a href="https://github.com/saboaua/Stock-Portfolio-Tracker/issues"><img src="https://img.shields.io/github/issues/saboaua/Stock-Portfolio-Tracker?style=flat-square" alt="Issues"></a>
 </p>
 
 <p align="center">
