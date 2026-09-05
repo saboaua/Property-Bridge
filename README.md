@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/saboaua/Property-Bridge/releases"><img src="https://img.shields.io/github/v/release/saboaua/Stock-Portfolio-Tracker?style=flat-square&label=release" alt="Release"></a>
+  <a href="https://github.com/saboaua/Property-Bridge/releases"><img src="https://img.shields.io/github/v/release/saboaua/Property-Bridge?style=flat-square&label=release" alt="Release"></a>
   <img src="https://img.shields.io/badge/HACS-Custom-orange?style=flat-square" alt="HACS">
   <img src="https://img.shields.io/badge/HA-2024.6+-41BDF5?style=flat-square" alt="Home Assistant">
   <a href="https://ko-fi.com/patrickgfortin"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white" alt="Buy Me a Coffee"></a>
